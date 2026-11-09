@@ -1,7 +1,11 @@
 package app.hoyu.shot.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,38 +33,55 @@ fun FocusRingOverlay(
     if (tapPoint == null) return
 
     var visible by remember(tapPoint.timestamp) { mutableStateOf(true) }
+    val animatedScale = remember(tapPoint.timestamp) { Animatable(1.4f) }
 
+    // Entrance and state animation
     LaunchedEffect(tapPoint.timestamp) {
         visible = true
-        delay(2200)
+        // Quick, snappy zoom-in spring when tapping
+        animatedScale.snapTo(1.4f)
+        animatedScale.animateTo(
+            targetValue = 1.0f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
+        )
+        // Auto-dismiss after 2 seconds
+        delay(2000)
         visible = false
     }
 
-    val targetScale = when (tapPoint.state) {
-        FocusState.FOCUSING -> 1.0f
-        FocusState.LOCKED_SUCCESS -> 0.9f
-        FocusState.LOCKED_FAILED -> 1.0f
-        FocusState.IDLE -> 1.0f
+    // Secondary pulse when lock succeeds
+    LaunchedEffect(tapPoint.state) {
+        if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+            animatedScale.animateTo(
+                targetValue = 0.88f,
+                animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing)
+            )
+            animatedScale.animateTo(
+                targetValue = 0.95f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)
+            )
+        }
     }
-
-    val animatedScale by animateFloatAsState(
-        targetValue = targetScale,
-        animationSpec = tween(durationMillis = 250),
-        label = "scale"
-    )
 
     // Strictly Nothing OS minimal palette: White focusing, Nothing Red locked!
-    val ringColor = when (tapPoint.state) {
-        FocusState.FOCUSING -> Color(0xFFFAFAFA)
-        FocusState.LOCKED_SUCCESS -> Color(0xFFE11D48)
-        FocusState.LOCKED_FAILED -> Color(0xFF71717A)
-        FocusState.IDLE -> Color(0xFFFAFAFA)
-    }
+    val ringColor by animateColorAsState(
+        targetValue = when (tapPoint.state) {
+            FocusState.FOCUSING -> Color(0xFFFAFAFA)
+            FocusState.LOCKED_SUCCESS -> Color(0xFFE11D48)
+            FocusState.LOCKED_FAILED -> Color(0xFF71717A)
+            FocusState.IDLE -> Color(0xFFFAFAFA)
+        },
+        animationSpec = tween(150),
+        label = "ringColor"
+    )
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(150)),
-        exit = fadeOut(tween(400))
+        enter = fadeIn(tween(100)),
+        exit = fadeOut(tween(350))
     ) {
         Box(modifier = modifier.fillMaxSize()) {
             val ringSize = 72.dp
@@ -75,11 +96,12 @@ fun FocusRingOverlay(
                     }
             ) {
                 val center = Offset(size.width / 2f, size.height / 2f)
-                val radius = (size.width / 2f - 4f) * animatedScale
+                val currentScale = animatedScale.value
+                val radius = (size.width / 2f - 4f) * currentScale
 
                 // Focus square with corner brackets
                 val halfSide = radius * 0.95f
-                val cornerLen = halfSide * 0.4f
+                val cornerLen = halfSide * 0.42f
                 val strokeW = 2.5f
 
                 // Top-Left Corner
@@ -98,11 +120,11 @@ fun FocusRingOverlay(
                 drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
                 drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
 
-                // Center crosshair dot
+                // Center crosshair dot on lock
                 if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
                     drawCircle(
                         color = Color(0xFFE11D48),
-                        radius = 3f,
+                        radius = 3.5f,
                         center = center
                     )
                 }

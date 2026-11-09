@@ -2,13 +2,14 @@ package app.hoyu.shot.ui
 
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceHolder
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,6 +56,19 @@ fun CameraScreen(
     var isFormatMenuVisible by remember { mutableStateOf(false) }
     var activeParamMenu by remember { mutableStateOf<DialParameter?>(null) }
 
+    // Intercept system Back button so it navigates internally inside the app
+    BackHandler(
+        enabled = uiState.isGalleryVisible || activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible
+    ) {
+        when {
+            uiState.isGalleryVisible -> viewModel.closeGallery()
+            activeParamMenu != null -> activeParamMenu = null
+            isFormatMenuVisible -> isFormatMenuVisible = false
+            isModeModalVisible -> isModeModalVisible = false
+            isSettingsDialogVisible -> isSettingsDialogVisible = false
+        }
+    }
+
     // Smooth In-Place Rotation for icons and dialogs
     val animatedRotation by animateFloatAsState(
         targetValue = uiState.uiRotationDegrees,
@@ -90,7 +104,7 @@ fun CameraScreen(
             .background(Color(0xFF000000))
     ) {
         // Dynamic Layout Calculation:
-        // In 4:3 or 1:1 ratios, black margins are large enough to hold top bar and bottom controls without obscuring preview.
+        // In 4:3 or 1:1 ratios, black margins are preserved. Controls sit in black bars without obscuring preview.
         // In 16:9 or Full, controls dynamically overlay the preview with translucent glass styling so buttons never get crushed.
         val previewHeightEstimate = maxWidth / previewRatio
         val leftoverHeight = maxHeight - previewHeightEstimate
@@ -140,6 +154,8 @@ fun CameraScreen(
                         shape = shape,
                         isOverlayMode = false,
                         onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
+                        onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
+                        onSurfaceDestroyed = { viewModel.stopCamera() },
                         onSizeChanged = { previewContainerSize = it },
                         onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
                         onSwipeToGallery = { viewModel.openGallery() },
@@ -195,6 +211,8 @@ fun CameraScreen(
                         shape = shape,
                         isOverlayMode = true,
                         onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
+                        onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
+                        onSurfaceDestroyed = { viewModel.stopCamera() },
                         onSizeChanged = { previewContainerSize = it },
                         onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
                         onSwipeToGallery = { viewModel.openGallery() },
@@ -287,7 +305,7 @@ fun CameraScreen(
             )
         }
 
-        // Format & Megapixel Selector Popover (ProShot Image 8 style)
+        // Format & Megapixel Selector Popover (Centered popup matching Settings)
         FormatMenu(
             visible = isFormatMenuVisible,
             resolutions = uiState.availableResolutions,
@@ -297,97 +315,91 @@ fun CameraScreen(
             onResolutionSelected = { res -> viewModel.setResolution(res) },
             onFormatSelected = { fmt -> viewModel.setCaptureFormat(fmt) },
             onDismiss = { isFormatMenuVisible = false },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 50.dp, end = 12.dp)
+            modifier = Modifier.align(Alignment.Center)
         )
 
-        // Parameter Menu Popover (AF, SEC, ISO, WB)
+        // Parameter Menu Popover (Centered popup matching Settings)
         activeParamMenu?.let { param ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 175.dp),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                when (param) {
-                    DialParameter.SHUTTER -> {
-                        val shutterSpeeds = listOf(
-                            125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
-                            8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
-                            250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L
-                        )
-                        ParameterGridMenu(
-                            visible = true,
-                            title = "SEC // SHUTTER",
-                            items = shutterSpeeds,
-                            selectedItem = uiState.shutterSpeedNanos,
-                            rotationDegrees = animatedRotation,
-                            onItemSelected = { nanos ->
-                                viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
-                                viewModel.setShutterSpeedNanos(nanos)
-                            },
-                            formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
-                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
-                            isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
-                            onDismiss = { activeParamMenu = null }
-                        )
-                    }
-                    DialParameter.ISO -> {
-                        val isoValues = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
-                        ParameterGridMenu(
-                            visible = true,
-                            title = "ISO // SENSOR",
-                            items = isoValues,
-                            selectedItem = uiState.iso,
-                            rotationDegrees = animatedRotation,
-                            onItemSelected = { iso ->
-                                viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
-                                viewModel.setIso(iso)
-                            },
-                            formatItem = { "$it" },
-                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
-                            isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
-                            onDismiss = { activeParamMenu = null }
-                        )
-                    }
-                    DialParameter.FOCUS -> {
-                        val focusDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f)
-                        ParameterGridMenu(
-                            visible = true,
-                            title = "LENS // FOCUS",
-                            items = focusDiopters,
-                            selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters else null,
-                            rotationDegrees = animatedRotation,
-                            onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
-                            formatItem = { if (it == 0f) "∞ MACRO" else String.format("%.1fD", it) },
-                            onAutoSelected = { viewModel.toggleAutoFocus() },
-                            isAutoSelected = !uiState.isManualFocusEnabled,
-                            onDismiss = { activeParamMenu = null }
-                        )
-                    }
-                    DialParameter.WHITE_BALANCE -> {
-                        val kelvinValues = (2800..7500 step 300).toList()
-                        ParameterGridMenu(
-                            visible = true,
-                            title = "WB // KELVIN",
-                            items = kelvinValues,
-                            selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
-                            rotationDegrees = animatedRotation,
-                            onItemSelected = { k -> viewModel.setKelvin(k) },
-                            formatItem = { "${it}K" },
-                            onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
-                            isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
-                            onDismiss = { activeParamMenu = null }
-                        )
-                    }
-                    else -> {}
+            when (param) {
+                DialParameter.SHUTTER -> {
+                    val shutterSpeeds = listOf(
+                        125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
+                        8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
+                        250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L
+                    )
+                    ParameterGridMenu(
+                        visible = true,
+                        title = "SEC // SHUTTER",
+                        items = shutterSpeeds,
+                        selectedItem = uiState.shutterSpeedNanos,
+                        rotationDegrees = animatedRotation,
+                        onItemSelected = { nanos ->
+                            viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
+                            viewModel.setShutterSpeedNanos(nanos)
+                        },
+                        formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
+                        onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                        isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
+                        onDismiss = { activeParamMenu = null },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
                 }
+                DialParameter.ISO -> {
+                    val isoValues = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
+                    ParameterGridMenu(
+                        visible = true,
+                        title = "ISO // SENSOR",
+                        items = isoValues,
+                        selectedItem = uiState.iso,
+                        rotationDegrees = animatedRotation,
+                        onItemSelected = { iso ->
+                            viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
+                            viewModel.setIso(iso)
+                        },
+                        formatItem = { "$it" },
+                        onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                        isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
+                        onDismiss = { activeParamMenu = null },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                DialParameter.FOCUS -> {
+                    val focusDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f)
+                    ParameterGridMenu(
+                        visible = true,
+                        title = "LENS // FOCUS",
+                        items = focusDiopters,
+                        selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters else null,
+                        rotationDegrees = animatedRotation,
+                        onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
+                        formatItem = { if (it == 0f) "∞ MACRO" else String.format("%.1fD", it) },
+                        onAutoSelected = { viewModel.toggleAutoFocus() },
+                        isAutoSelected = !uiState.isManualFocusEnabled,
+                        onDismiss = { activeParamMenu = null },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                DialParameter.WHITE_BALANCE -> {
+                    val kelvinValues = (2800..7500 step 300).toList()
+                    ParameterGridMenu(
+                        visible = true,
+                        title = "WB // KELVIN",
+                        items = kelvinValues,
+                        selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
+                        rotationDegrees = animatedRotation,
+                        onItemSelected = { k -> viewModel.setKelvin(k) },
+                        formatItem = { "${it}K" },
+                        onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
+                        isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
+                        onDismiss = { activeParamMenu = null },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                else -> {}
             }
         }
 
-        // Mode Dial Selector Modal
+        // Mode Dial Selector Modal (Centered modal)
         ModeDialSelectorModal(
             visible = isModeModalVisible,
             currentMode = uiState.exposureMode,
@@ -397,7 +409,7 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // Settings Dialog
+        // Settings Dialog (Centered modal)
         SettingsDialog(
             visible = isSettingsDialogVisible,
             uiState = uiState,
@@ -413,11 +425,11 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // ProShot-style Gallery Viewer
+        // ProShot-style Gallery Viewer (Swiping left-to-right enters, matching the gesture!)
         AnimatedVisibility(
             visible = uiState.isGalleryVisible && uiState.recentPhotos.isNotEmpty(),
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
         ) {
             GalleryViewer(
                 photos = uiState.recentPhotos,
@@ -542,6 +554,8 @@ private fun ViewfinderPreviewContent(
     shape: RoundedCornerShape,
     isOverlayMode: Boolean,
     onSurfaceReady: (AutoFitSurfaceView) -> Unit,
+    onSurfaceCreated: (android.view.Surface) -> Unit,
+    onSurfaceDestroyed: () -> Unit,
     onSizeChanged: (IntSize) -> Unit,
     onZoomChanged: (Float) -> Unit,
     onSwipeToGallery: () -> Unit,
@@ -563,16 +577,24 @@ private fun ViewfinderPreviewContent(
                     }
                 }
             }
-            .pointerInput(Unit) {
-                var swipeAccumulator = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { swipeAccumulator = 0f },
-                    onHorizontalDrag = { change, dragAmount ->
+            .pointerInput(uiState.uiRotationDegrees) {
+                var accumulator = 0f
+                detectDragGestures(
+                    onDragStart = { accumulator = 0f },
+                    onDrag = { change, dragAmount ->
                         change.consume()
-                        swipeAccumulator += dragAmount
-                        if (swipeAccumulator > 50f) {
+                        // Calculate drag in user's visual frame of reference:
+                        // In ALL orientations, dragging left-to-right from user's perspective triggers gallery!
+                        val userHorizontalDrag = when (uiState.uiRotationDegrees) {
+                            90f -> -dragAmount.y // screen top-to-bottom is user's left-to-right
+                            180f -> -dragAmount.x // screen right-to-left is user's left-to-right
+                            270f -> dragAmount.y // screen bottom-to-top is user's left-to-right
+                            else -> dragAmount.x // screen left-to-right is user's left-to-right
+                        }
+                        accumulator += userHorizontalDrag
+                        if (accumulator > 50f) {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            swipeAccumulator = 0f
+                            accumulator = 0f
                             onSwipeToGallery()
                         }
                     }
@@ -586,7 +608,7 @@ private fun ViewfinderPreviewContent(
             },
         contentAlignment = Alignment.Center
     ) {
-        // Hardware Camera2 Surface
+        // Hardware Camera2 SurfaceView
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -594,10 +616,12 @@ private fun ViewfinderPreviewContent(
                     onSurfaceReady(this)
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
-                            // Camera start handled in viewModel
+                            onSurfaceCreated(holder.surface)
                         }
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {}
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            onSurfaceDestroyed()
+                        }
                     })
                 }
             },
@@ -617,7 +641,7 @@ private fun ViewfinderPreviewContent(
             histogram = uiState.histogram
         )
 
-        // Large Dual-Axis Horizon Level (Passes animatedRotation so it aligns with phone orientation!)
+        // Large Dual-Axis Horizon Level (Rotates with user holding orientation)
         if (uiState.isHorizonLevelVisible) {
             HorizonLevelIndicator(
                 orientation = uiState.horizon,
@@ -626,7 +650,7 @@ private fun ViewfinderPreviewContent(
             )
         }
 
-        // Tap-to-Focus Reticle
+        // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
 
         // Live Histogram: Only shown if enabled in settings, safe padding preventing overlay
@@ -635,8 +659,8 @@ private fun ViewfinderPreviewContent(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(
-                        top = if (isOverlayMode) 64.dp else 12.dp,
-                        start = 12.dp
+                        top = if (uiState.uiRotationDegrees != 0f) 80.dp else if (isOverlayMode) 60.dp else 14.dp,
+                        start = if (uiState.uiRotationDegrees != 0f) 64.dp else 14.dp
                     )
                     .rotate(animatedRotation)
                     .clip(shape)
@@ -648,54 +672,68 @@ private fun ViewfinderPreviewContent(
             }
         }
 
-        // Bottom Inside Preview: EV Position Alert Badge & Lens Switcher
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // EV Alert Badge (Resets EV to 0 on click!)
-            EvPositionAlertBadge(
-                evIndex = uiState.evCompensationIndex,
-                rotationDegrees = animatedRotation,
-                onResetEv = onResetEv
-            )
+        // EV Position Alert Badge: ALWAYS at the bottom of the user's view inside the preview!
+        if (uiState.evCompensationIndex != 0) {
+            val alertAlignment = when (uiState.uiRotationDegrees) {
+                90f -> Alignment.CenterStart
+                180f -> Alignment.TopCenter
+                270f -> Alignment.CenterEnd
+                else -> Alignment.BottomCenter
+            }
+            val alertPadding = when (uiState.uiRotationDegrees) {
+                90f -> Modifier.padding(start = 20.dp)
+                180f -> Modifier.padding(top = 56.dp)
+                270f -> Modifier.padding(end = 20.dp)
+                else -> Modifier.padding(bottom = 56.dp)
+            }
+            Box(
+                modifier = Modifier
+                    .align(alertAlignment)
+                    .then(alertPadding)
+            ) {
+                EvPositionAlertBadge(
+                    evIndex = uiState.evCompensationIndex,
+                    rotationDegrees = animatedRotation,
+                    onResetEv = onResetEv
+                )
+            }
+        }
 
-            // Lens Switcher: Horizontal pill row (0.6x, 1x, 3.2x)
-            if (uiState.availableLenses.size > 1) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
-                        val isSelected = uiState.currentLens?.id == lens.id
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(shape)
-                                .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
-                                .border(
-                                    1.dp,
-                                    if (isSelected) Color(0xFFFAFAFA) else Color(0x66FFFFFF),
-                                    shape
-                                )
-                                .clickable {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    onSelectLens(lens)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = lens.label,
-                                color = if (isSelected) Color.Black else Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.rotate(animatedRotation)
+        // Bottom Inside Preview: Lens Switcher (0.6x, 1x, 3.2x horizontally)
+        if (uiState.availableLenses.size > 1) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
+                    val isSelected = uiState.currentLens?.id == lens.id
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(shape)
+                            .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
+                            .border(
+                                1.dp,
+                                if (isSelected) Color(0xFFFAFAFA) else Color(0x66FFFFFF),
+                                shape
                             )
-                        }
+                            .clickable {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onSelectLens(lens)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = lens.label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.rotate(animatedRotation)
+                        )
                     }
                 }
             }

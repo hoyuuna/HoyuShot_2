@@ -5,7 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 
 @Composable
 fun DedicatedBottomEvBar(
@@ -37,7 +39,9 @@ fun DedicatedBottomEvBar(
     val shape = RoundedCornerShape(2.dp)
     val totalSteps = (maxEv - minEv).coerceAtLeast(1)
 
-    // A prominent, solid bar at the bottom with the height of a camera lens button (~38dp)
+    // Direct 1:1 finger tracking fraction (null when not touching)
+    var activeTouchFraction by remember { mutableStateOf<Float?>(null) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -66,28 +70,49 @@ fun DedicatedBottomEvBar(
                 .padding(horizontal = 4.dp)
         )
 
-        // Thick, prominent Draggable Ruler Track
+        // Direct 1:1 finger-following Draggable Ruler Track
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .pointerInput(minEv, maxEv, evIndex) {
-                    var accumulated = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { accumulated = 0f },
-                        onHorizontalDrag = { change, dragAmount ->
+                .pointerInput(minEv, maxEv) {
+                    detectTapGestures { offset ->
+                        val trackW = size.width - 16f
+                        val fraction = ((offset.x - 8f) / trackW).coerceIn(0f, 1f)
+                        val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
+                        if (step != evIndex) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onEvChanged(step)
+                        }
+                    }
+                }
+                .pointerInput(minEv, maxEv) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            val trackW = size.width - 16f
+                            val fraction = ((offset.x - 8f) / trackW).coerceIn(0f, 1f)
+                            activeTouchFraction = fraction
+                            val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
+                            if (step != evIndex) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                onEvChanged(step)
+                            }
+                        },
+                        onDragEnd = {
+                            activeTouchFraction = null
+                        },
+                        onDragCancel = {
+                            activeTouchFraction = null
+                        },
+                        onDrag = { change, _ ->
                             change.consume()
-                            accumulated += dragAmount
-                            val width = size.width
-                            val stepPx = width / totalSteps.toFloat()
-                            val deltaSteps = (accumulated / stepPx).toInt()
-                            if (deltaSteps != 0) {
-                                val next = (evIndex + deltaSteps).coerceIn(minEv, maxEv)
-                                if (next != evIndex) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                    onEvChanged(next)
-                                    accumulated = 0f
-                                }
+                            val trackW = size.width - 16f
+                            val fraction = ((change.position.x - 8f) / trackW).coerceIn(0f, 1f)
+                            activeTouchFraction = fraction
+                            val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
+                            if (step != evIndex) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                onEvChanged(step)
                             }
                         }
                     )
@@ -97,19 +122,21 @@ fun DedicatedBottomEvBar(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val centerY = size.height / 2f
+                val paddingX = 8f
+                val trackWidth = width - 2 * paddingX
 
                 // Base ruler guide
                 drawLine(
                     color = Color(0xFF27272A),
-                    start = Offset(4f, centerY),
-                    end = Offset(width - 4f, centerY),
-                    strokeWidth = 4f
+                    start = Offset(paddingX, centerY),
+                    end = Offset(width - paddingX, centerY),
+                    strokeWidth = 3f
                 )
 
                 // Tick marks along the track
                 for (i in minEv..maxEv) {
                     val f = (i - minEv).toFloat() / totalSteps.toFloat()
-                    val x = 4f + f * (width - 8f)
+                    val x = paddingX + f * trackWidth
                     val isZero = i == 0
                     val tickHeight = if (isZero) 14f else 8f
                     drawLine(
@@ -120,10 +147,10 @@ fun DedicatedBottomEvBar(
                     )
                 }
 
-                // Current EV Thumb (Solid thick rectangular pill)
-                val fraction = (evIndex - minEv).toFloat() / totalSteps.toFloat()
-                val thumbX = 4f + fraction * (width - 8f)
-                val thumbW = 22f
+                // Current EV Thumb (Tracks finger directly when dragging, otherwise snaps to evIndex)
+                val targetFraction = activeTouchFraction ?: ((evIndex - minEv).toFloat() / totalSteps.toFloat())
+                val thumbX = paddingX + targetFraction * trackWidth
+                val thumbW = 24f
                 val thumbH = 20f
 
                 drawRoundRect(

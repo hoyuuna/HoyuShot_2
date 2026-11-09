@@ -58,7 +58,7 @@ fun <T> ParameterGridMenu(
         visible = visible,
         enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
         exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
-        modifier = modifier.padding(8.dp)
+        modifier = modifier.padding(16.dp)
     ) {
         Box(
             modifier = Modifier.rotate(rotationDegrees),
@@ -66,15 +66,15 @@ fun <T> ParameterGridMenu(
         ) {
             Column(
                 modifier = Modifier
-                    .width(250.dp)
-                    .heightIn(max = 240.dp)
+                    .width(280.dp)
+                    .heightIn(max = 280.dp)
                     .clip(shape)
                     .background(Color(0xF509090B)) // shadcn zinc-950
                     .border(1.dp, Color(0xFF27272A), shape)
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Header
+                // Header (Centered modal style matching Settings)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -83,7 +83,7 @@ fun <T> ParameterGridMenu(
                     Text(
                         text = title.uppercase(),
                         color = Color(0xFFFAFAFA),
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 1.sp
@@ -91,11 +91,11 @@ fun <T> ParameterGridMenu(
                     Text(
                         text = "[ESC]",
                         color = Color(0xFFA1A1AA),
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier
                             .clickable { onDismiss() }
-                            .padding(2.dp)
+                            .padding(4.dp)
                     )
                 }
 
@@ -105,7 +105,7 @@ fun <T> ParameterGridMenu(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(32.dp)
+                        .height(34.dp)
                         .clip(shape)
                         .background(if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B))
                         .border(
@@ -139,19 +139,19 @@ fun <T> ParameterGridMenu(
                     }
                 }
 
-                // Clean list of values matching Settings / Mode design
+                // Scrollable parameter list
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f, fill = false)
                         .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     items(items) { item ->
                         val isSelected = !isAutoSelected && item == selectedItem
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(30.dp)
+                                .height(32.dp)
                                 .clip(shape)
                                 .background(if (isSelected) Color(0x33E11D48) else Color(0xFF18181B))
                                 .border(
@@ -178,7 +178,7 @@ fun <T> ParameterGridMenu(
                             if (isSelected) {
                                 Box(
                                     modifier = Modifier
-                                        .size(5.dp)
+                                        .size(6.dp)
                                         .clip(shape)
                                         .background(Color(0xFFE11D48))
                                 )

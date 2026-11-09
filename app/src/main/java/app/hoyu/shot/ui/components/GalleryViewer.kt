@@ -51,7 +51,6 @@ import java.util.*
 @Composable
 fun GalleryViewer(
     photos: List<CapturedPhotoInfo>,
-    initialIndex: Int = 0,
     rotationDegrees: Float = 0f,
     onDismiss: () -> Unit,
     onDeletePhoto: (CapturedPhotoInfo) -> Unit,
@@ -63,12 +62,22 @@ fun GalleryViewer(
     }
 
     val context = LocalContext.current
+
+    // Reverse photo list so:
+    // Page 0 = Oldest photo
+    // Page (size - 1) = Newest photo
+    // Result:
+    // - Swipe Left-to-Right: moves towards Page 0 (views older photos!)
+    // - Swipe Right-to-Left: moves towards Page (size-1) (views newer photos!)
+    // - At newest photo: swiping Right-to-Left exits back to camera!
+    val orderedPhotos = remember(photos) { photos.reversed() }
+
     val pagerState = rememberPagerState(
-        initialPage = initialIndex.coerceIn(0, photos.size - 1),
-        pageCount = { photos.size }
+        initialPage = (orderedPhotos.size - 1).coerceAtLeast(0),
+        pageCount = { orderedPhotos.size }
     )
 
-    val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
+    val currentPhoto = orderedPhotos.getOrNull(pagerState.currentPage) ?: orderedPhotos.last()
     var isUiChromeVisible by remember { mutableStateOf(true) }
     val shape = RoundedCornerShape(2.dp)
 
@@ -82,12 +91,13 @@ fun GalleryViewer(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { page ->
-            val photo = photos[page]
+            val photo = orderedPhotos[page]
+            val isNewest = page == orderedPhotos.size - 1
             ZoomablePhotoItem(
                 photo = photo,
                 onToggleChrome = { isUiChromeVisible = !isUiChromeVisible },
-                onSwipeRightAtEdge = {
-                    if (page == 0) {
+                onSwipeAtNewestEdge = {
+                    if (isNewest) {
                         onDismiss()
                     }
                 }
@@ -269,7 +279,7 @@ private fun ExifSpecItem(text: String) {
 private fun ZoomablePhotoItem(
     photo: CapturedPhotoInfo,
     onToggleChrome: () -> Unit,
-    onSwipeRightAtEdge: () -> Unit
+    onSwipeAtNewestEdge: () -> Unit
 ) {
     val context = LocalContext.current
     var bitmap by remember(photo.uriString) { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -309,9 +319,9 @@ private fun ZoomablePhotoItem(
                         )
                     } else {
                         offset = Offset.Zero
-                        // If dragging right while not zoomed in at edge, return to camera
-                        if (pan.x > 35f) {
-                            onSwipeRightAtEdge()
+                        // When at 1x scale, dragging right-to-left at newest photo returns to camera!
+                        if (pan.x < -35f) {
+                            onSwipeAtNewestEdge()
                         }
                     }
                 }
