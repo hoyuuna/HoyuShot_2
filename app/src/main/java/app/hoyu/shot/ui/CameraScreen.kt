@@ -139,7 +139,7 @@ fun CameraScreen(
                         animatedRotation = animatedRotation,
                         shape = shape,
                         isOverlayMode = false,
-                        onSurfaceReady = { surfaceViewRef = it },
+                        onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
                         onSizeChanged = { previewContainerSize = it },
                         onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
                         onSwipeToGallery = { viewModel.openGallery() },
@@ -148,7 +148,7 @@ fun CameraScreen(
                             isFormatMenuVisible = false
                             viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
                         },
-                        onSelectLens = { lens -> viewModel.selectLens(lens) },
+                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
                         onResetEv = { viewModel.setEvCompensation(0) }
                     )
                 }
@@ -194,7 +194,7 @@ fun CameraScreen(
                         animatedRotation = animatedRotation,
                         shape = shape,
                         isOverlayMode = true,
-                        onSurfaceReady = { surfaceViewRef = it },
+                        onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
                         onSizeChanged = { previewContainerSize = it },
                         onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
                         onSwipeToGallery = { viewModel.openGallery() },
@@ -203,7 +203,7 @@ fun CameraScreen(
                             isFormatMenuVisible = false
                             viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
                         },
-                        onSelectLens = { lens -> viewModel.selectLens(lens) },
+                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
                         onResetEv = { viewModel.setEvCompensation(0) }
                     )
                 }
@@ -546,7 +546,7 @@ private fun ViewfinderPreviewContent(
     onZoomChanged: (Float) -> Unit,
     onSwipeToGallery: () -> Unit,
     onTouchFocus: (androidx.compose.ui.geometry.Offset) -> Unit,
-    onSelectLens: (CameraLensInfo) -> Unit,
+    onSelectLens: (LensItem) -> Unit,
     onResetEv: () -> Unit
 ) {
     val view = LocalView.current
@@ -860,8 +860,8 @@ private fun BottomControlsContent(
         // Spans the full width of the control region, matching lens switcher width!
         DedicatedBottomEvBar(
             evIndex = uiState.evCompensationIndex,
-            minEv = uiState.capabilities?.evRange?.lower ?: -6,
-            maxEv = uiState.capabilities?.evRange?.upper ?: 6,
+            minEv = uiState.capabilities?.evCompensationRange?.lower ?: -6,
+            maxEv = uiState.capabilities?.evCompensationRange?.upper ?: 6,
             rotationDegrees = animatedRotation,
             onEvChanged = onEvChanged,
             onResetEv = onResetEv

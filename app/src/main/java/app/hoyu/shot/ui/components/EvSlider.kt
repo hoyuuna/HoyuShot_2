@@ -37,7 +37,7 @@ fun DedicatedBottomEvBar(
     val shape = RoundedCornerShape(2.dp)
     val totalSteps = (maxEv - minEv).coerceAtLeast(1)
 
-    // A prominent, solid bar at the bottom with the height of a camera lens button (~36dp)
+    // A prominent, solid bar at the bottom with the height of a camera lens button (~38dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -171,6 +171,54 @@ fun DedicatedBottomEvBar(
                 color = if (evIndex != 0) Color(0xFFFF4D6D) else Color(0xFFA1A1AA),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
+@Composable
+fun EvPositionAlertBadge(
+    evIndex: Int,
+    rotationDegrees: Float = 0f,
+    onResetEv: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (evIndex == 0) return
+
+    val view = LocalView.current
+    val shape = RoundedCornerShape(2.dp)
+    val sign = if (evIndex > 0) "+$evIndex" else "$evIndex"
+
+    Box(
+        modifier = modifier
+            .rotate(rotationDegrees)
+            .clip(shape)
+            .background(Color(0xD909090B)) // Translucent Nothing Dark
+            .border(1.dp, Color(0xFFE11D48), shape) // Nothing Red border
+            .clickable {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onResetEv() // Resets EV to 0 on tap as requested!
+            }
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "EV IN POSITION $sign",
+                color = Color(0xFFFF4D6D),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.8.sp
+            )
+            Text(
+                text = "[RESET]",
+                color = Color(0xFFFAFAFA),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
         }
