@@ -2,6 +2,7 @@ package app.hoyu.shot.ui.components
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,9 +12,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +45,7 @@ fun <T> ParameterGridMenu(
 ) {
     val view = LocalView.current
     val shape = RoundedCornerShape(2.dp)
+    val scrollState = rememberScrollState()
 
     // 5-second inactivity auto-close timer
     var interactionTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -66,22 +68,22 @@ fun <T> ParameterGridMenu(
         ) {
             Column(
                 modifier = Modifier
-                    .width(280.dp)
+                    .width(320.dp)
                     .heightIn(max = 280.dp)
                     .clip(shape)
                     .background(Color(0xF509090B)) // shadcn zinc-950
                     .border(1.dp, Color(0xFF27272A), shape)
                     .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Header (Centered modal style matching Settings)
+                // Header (Matching SettingsDialog)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = title.uppercase(),
+                        text = "SYS // $title",
                         color = Color(0xFFFAFAFA),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -99,89 +101,139 @@ fun <T> ParameterGridMenu(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
+                // 1. "AUTO TRÊN CÙNG TO NHẤT": Prominent wide card styled exactly like Resume Settings
+                val autoBgColor by animateColorAsState(
+                    targetValue = if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B),
+                    label = "autoBg"
+                )
+                val autoBorderColor by animateColorAsState(
+                    targetValue = if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                    label = "autoBorder"
+                )
 
-                // Wide AUTO Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(34.dp)
                         .clip(shape)
-                        .background(if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B))
-                        .border(
-                            1.dp,
-                            if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A),
-                            shape
-                        )
+                        .background(autoBgColor)
+                        .border(1.dp, autoBorderColor, shape)
                         .clickable {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             interactionTimestamp = System.currentTimeMillis()
                             onAutoSelected()
                         }
-                        .padding(horizontal = 10.dp),
+                        .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "AUTO",
-                        color = if (isAutoSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    if (isAutoSelected) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(shape)
-                                .background(Color(0xFFE11D48))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "AUTO METERING",
+                            color = if (isAutoSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "Automatic hardware metering & calculation",
+                            color = Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Animated ON / OFF Pill
+                    Box(
+                        modifier = Modifier
+                            .clip(shape)
+                            .background(if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isAutoSelected) "ON" else "OFF",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
                         )
                     }
                 }
 
-                // Scrollable parameter list
-                LazyColumn(
+                // 2. "CUSTOM Ở DƯỚI NHỎ HƠN VÀ CÓ ANIMATION": Grid of smaller cards
+                Text(
+                    text = "MANUAL PRESETS",
+                    color = Color(0xFF71717A),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                )
+
+                // 2-Column layout of smaller cards with smooth animated selection
+                Column(
                     modifier = Modifier
                         .weight(1f, fill = false)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(items) { item ->
-                        val isSelected = !isAutoSelected && item == selectedItem
+                    val chunkedItems = items.chunked(2)
+                    chunkedItems.forEach { pair ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(32.dp)
-                                .clip(shape)
-                                .background(if (isSelected) Color(0x33E11D48) else Color(0xFF18181B))
-                                .border(
-                                    1.dp,
-                                    if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
-                                    shape
-                                )
-                                .clickable {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    interactionTimestamp = System.currentTimeMillis()
-                                    onItemSelected(item)
-                                }
-                                .padding(horizontal = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = formatItem(item),
-                                color = if (isSelected) Color(0xFFFF4D6D) else Color(0xFFE4E4E7),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            if (isSelected) {
+                            pair.forEach { item ->
+                                val isSelected = !isAutoSelected && item == selectedItem
+                                val itemBgColor by animateColorAsState(
+                                    targetValue = if (isSelected) Color(0x33E11D48) else Color(0xFF18181B),
+                                    label = "itemBg"
+                                )
+                                val itemBorderColor by animateColorAsState(
+                                    targetValue = if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                    label = "itemBorder"
+                                )
+
                                 Box(
                                     modifier = Modifier
-                                        .size(6.dp)
+                                        .weight(1f)
+                                        .height(38.dp)
                                         .clip(shape)
-                                        .background(Color(0xFFE11D48))
-                                )
+                                        .background(itemBgColor)
+                                        .border(1.dp, itemBorderColor, shape)
+                                        .clickable {
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            interactionTimestamp = System.currentTimeMillis()
+                                            onItemSelected(item)
+                                        }
+                                        .padding(horizontal = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = formatItem(item),
+                                            color = if (isSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(shape)
+                                                    .background(Color(0xFFE11D48))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (pair.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }

@@ -2,7 +2,9 @@ package app.hoyu.shot.ui.components
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -12,6 +14,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -41,6 +44,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.exifinterface.media.ExifInterface
 import app.hoyu.shot.model.CapturedPhotoInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,198 +69,211 @@ fun GalleryViewer(
 
     // Reverse photo list so:
     // Page 0 = Oldest photo
-    // Page (size - 1) = Newest photo
-    // Result:
-    // - Swipe Left-to-Right: moves towards Page 0 (views older photos!)
-    // - Swipe Right-to-Left: moves towards Page (size-1) (views newer photos!)
-    // - At newest photo: swiping Right-to-Left exits back to camera!
+    // Page (orderedPhotos.size - 1) = Newest photo
+    // Page orderedPhotos.size = Phantom exit page (swiping right-to-left past newest photo returns to camera)
     val orderedPhotos = remember(photos) { photos.reversed() }
 
     val pagerState = rememberPagerState(
         initialPage = (orderedPhotos.size - 1).coerceAtLeast(0),
-        pageCount = { orderedPhotos.size }
+        pageCount = { orderedPhotos.size + 1 }
     )
 
-    val currentPhoto = orderedPhotos.getOrNull(pagerState.currentPage) ?: orderedPhotos.last()
+    // Detect swipe past newest photo into phantom page and smoothly exit
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage == orderedPhotos.size) {
+            onDismiss()
+        }
+    }
+
+    // Ensure we start on the newest photo when opening
+    LaunchedEffect(photos) {
+        if (orderedPhotos.isNotEmpty()) {
+            pagerState.scrollToPage(orderedPhotos.size - 1)
+        }
+    }
+
+    val currentPhotoIndex = pagerState.currentPage.coerceAtMost(orderedPhotos.size - 1)
+    val currentPhoto = orderedPhotos.getOrNull(currentPhotoIndex) ?: orderedPhotos.last()
     var isUiChromeVisible by remember { mutableStateOf(true) }
     val shape = RoundedCornerShape(2.dp)
 
-    Box(
+    // Dynamic rotation: In landscape (90 or 270), swap dimensions so the entire viewer layout
+    // (top bar, bottom bar, photo) is oriented naturally to the user's holding direction!
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF000000))
     ) {
-        // Horizontal Pager for smooth swipe left/right photo browsing
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize()
-        ) { page ->
-            val photo = orderedPhotos[page]
-            val isNewest = page == orderedPhotos.size - 1
-            ZoomablePhotoItem(
-                photo = photo,
-                onToggleChrome = { isUiChromeVisible = !isUiChromeVisible },
-                onSwipeAtNewestEdge = {
-                    if (isNewest) {
-                        onDismiss()
-                    }
-                }
-            )
-        }
+        val isLandscape = rotationDegrees == 90f || rotationDegrees == 270f
+        val viewportWidth = if (isLandscape) maxHeight else maxWidth
+        val viewportHeight = if (isLandscape) maxWidth else maxHeight
 
-        // Top ProShot-style EXIF Bar (Adaptive to phone rotation)
-        AnimatedVisibility(
-            visible = isUiChromeVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter)
+        Box(
+            modifier = Modifier
+                .size(viewportWidth, viewportHeight)
+                .align(Alignment.Center)
+                .rotate(rotationDegrees)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xD909090B)) // shadcn zinc-950 translucent
-                    .statusBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-                // Top Row: Back button and EXIF Specs
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back to Camera",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .rotate(rotationDegrees)
-                        )
-                    }
-
-                    // EXIF parameters in ProShot format:
-                    // MP | Resolution | Aperture | ISO | Shutter | File Size
-                    val mp = String.format(Locale.US, "%.1f MP", (currentPhoto.width * currentPhoto.height) / 1_000_000f)
-                    val res = "${currentPhoto.width}x${currentPhoto.height}"
-                    val aperture = currentPhoto.aperture.ifEmpty { "f/1.8" }
-                    val isoStr = "ISO ${currentPhoto.iso}"
-                    val shutterStr = currentPhoto.shutterSpeed
-                    val sizeMb = if (currentPhoto.fileSizeBytes > 0) {
-                        String.format(Locale.US, "%.1f MB", currentPhoto.fileSizeBytes / (1024f * 1024f))
-                    } else "3.8 MB"
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.rotate(rotationDegrees)
-                    ) {
-                        ExifSpecItem(mp)
-                        ExifSpecItem(res)
-                        ExifSpecItem(aperture)
-                        ExifSpecItem(isoStr)
-                        ExifSpecItem(shutterStr)
-                        ExifSpecItem(sizeMb)
-                    }
+            // Horizontal Pager for smooth swipe left/right photo browsing
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                if (page < orderedPhotos.size) {
+                    val photo = orderedPhotos[page]
+                    ZoomablePhotoItem(
+                        photo = photo,
+                        onToggleChrome = { isUiChromeVisible = !isUiChromeVisible }
+                    )
+                } else {
+                    // Phantom transparent exit page: reveals camera underneath
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Transparent))
                 }
-
-                // Subline: Timestamp date
-                val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    .format(Date(currentPhoto.timestamp))
-                Text(
-                    text = dateStr,
-                    color = Color(0xFF71717A),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .padding(start = 42.dp, top = 2.dp)
-                        .rotate(rotationDegrees)
-                )
             }
-        }
 
-        // Bottom ProShot-style Action Bar
-        AnimatedVisibility(
-            visible = isUiChromeVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xD909090B))
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Top ProShot-style EXIF Bar: ALWAYS at the TOP of the user's rotated view
+            AnimatedVisibility(
+                visible = isUiChromeVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                // Bottom-Left: Filename Badge
-                val name = currentPhoto.fileName.ifEmpty {
-                    val parts = currentPhoto.uriString.split("/")
-                    parts.lastOrNull() ?: "IMG_HoyuShot.jpg"
-                }
-                Box(
+                Column(
                     modifier = Modifier
-                        .clip(shape)
-                        .background(Color(0x33FFFFFF))
-                        .border(1.dp, Color(0xFF27272A), shape)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .fillMaxWidth()
+                        .background(Color(0xD909090B)) // shadcn zinc-950 translucent
+                        .then(if (rotationDegrees == 0f) Modifier.statusBarsPadding() else Modifier)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
+                    // Top Row: Back button and EXIF Specs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back to Camera",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // EXIF parameters in ProShot format:
+                        val mp = String.format(Locale.US, "%.1f MP", (currentPhoto.width * currentPhoto.height) / 1_000_000f)
+                        val res = "${currentPhoto.width}x${currentPhoto.height}"
+                        val aperture = currentPhoto.aperture.ifEmpty { "f/1.8" }
+                        val isoStr = "ISO ${currentPhoto.iso}"
+                        val shutterStr = currentPhoto.shutterSpeed
+                        val sizeMb = if (currentPhoto.fileSizeBytes > 0) {
+                            String.format(Locale.US, "%.1f MB", currentPhoto.fileSizeBytes / (1024f * 1024f))
+                        } else "3.8 MB"
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ExifSpecItem(mp)
+                            ExifSpecItem(res)
+                            ExifSpecItem(aperture)
+                            ExifSpecItem(isoStr)
+                            ExifSpecItem(shutterStr)
+                            ExifSpecItem(sizeMb)
+                        }
+                    }
+
+                    // Subline: Timestamp date
+                    val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                        .format(Date(currentPhoto.timestamp))
                     Text(
-                        text = name,
-                        color = Color(0xFFFAFAFA),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = dateStr,
+                        color = Color(0xFF71717A),
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.rotate(rotationDegrees)
+                        modifier = Modifier.padding(start = 42.dp, top = 2.dp)
                     )
                 }
+            }
 
-                // Bottom-Right: Share & Delete buttons (Clean shadcn style)
+            // Bottom ProShot-style Action Bar: ALWAYS at the BOTTOM of the user's rotated view
+            AnimatedVisibility(
+                visible = isUiChromeVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xD909090B))
+                        .then(if (rotationDegrees == 0f) Modifier.navigationBarsPadding() else Modifier)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Share Button
-                    IconButton(
-                        onClick = { sharePhoto(context, currentPhoto.uriString) },
+                    // Bottom-Left: Filename Badge
+                    val name = currentPhoto.fileName.ifEmpty {
+                        val parts = currentPhoto.uriString.split("/")
+                        parts.lastOrNull() ?: "IMG_HoyuShot.jpg"
+                    }
+                    Box(
                         modifier = Modifier
-                            .size(38.dp)
                             .clip(shape)
                             .background(Color(0x33FFFFFF))
                             .border(1.dp, Color(0xFF27272A), shape)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Share",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .rotate(rotationDegrees)
+                        Text(
+                            text = name,
+                            color = Color(0xFFFAFAFA),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace
                         )
                     }
 
-                    // Delete Button
-                    IconButton(
-                        onClick = { onDeletePhoto(currentPhoto) },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(shape)
-                            .background(Color(0x33E11D48))
-                            .border(1.dp, Color(0xFFE11D48), shape)
+                    // Bottom-Right: Share & Delete buttons (Clean shadcn style)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Delete",
-                            tint = Color(0xFFFF4D6D),
+                        // Share Button
+                        IconButton(
+                            onClick = { sharePhoto(context, currentPhoto.uriString) },
                             modifier = Modifier
-                                .size(18.dp)
-                                .rotate(rotationDegrees)
-                        )
+                                .size(38.dp)
+                                .clip(shape)
+                                .background(Color(0x33FFFFFF))
+                                .border(1.dp, Color(0xFF27272A), shape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // Delete Button
+                        IconButton(
+                            onClick = { onDeletePhoto(currentPhoto) },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(shape)
+                                .background(Color(0x33E11D48))
+                                .border(1.dp, Color(0xFFE11D48), shape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                tint = Color(0xFFFF4D6D),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -278,11 +295,10 @@ private fun ExifSpecItem(text: String) {
 @Composable
 private fun ZoomablePhotoItem(
     photo: CapturedPhotoInfo,
-    onToggleChrome: () -> Unit,
-    onSwipeAtNewestEdge: () -> Unit
+    onToggleChrome: () -> Unit
 ) {
     val context = LocalContext.current
-    var bitmap by remember(photo.uriString) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var bitmap by remember(photo.uriString) { mutableStateOf<Bitmap?>(null) }
 
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -291,11 +307,39 @@ private fun ZoomablePhotoItem(
         withContext(Dispatchers.IO) {
             try {
                 val uri = Uri.parse(photo.uriString)
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val opts = BitmapFactory.Options().apply {
-                        inSampleSize = 1
+                val exifRotation = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val exif = ExifInterface(stream)
+                    when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
                     }
-                    bitmap = BitmapFactory.decodeStream(stream, null, opts)
+                } ?: 0f
+
+                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, boundsOpts)
+                }
+                var sample = 1
+                while (boundsOpts.outWidth / (sample * 2) >= 2560 || boundsOpts.outHeight / (sample * 2) >= 2560) {
+                    sample *= 2
+                }
+
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+                val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+
+                if (raw != null) {
+                    bitmap = if (exifRotation != 0f) {
+                        val matrix = Matrix().apply { postRotate(exifRotation) }
+                        val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                        if (rotated != raw) raw.recycle()
+                        rotated
+                    } else {
+                        raw
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -306,27 +350,32 @@ private fun ZoomablePhotoItem(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                    scale = newScale
-                    if (newScale > 1f) {
+            .pointerInput(scale) {
+                // Double tap to zoom in/out
+                detectTapGestures(
+                    onDoubleTap = {
+                        scale = if (scale > 1.2f) 1f else 2.5f
+                        offset = Offset.Zero
+                    },
+                    onTap = { onToggleChrome() }
+                )
+            }
+            .pointerInput(scale) {
+                // Only intercept drag gestures when zoomed in!
+                // When scale is 1f, do NOT intercept so HorizontalPager swipes freely to older/newer photos!
+                if (scale > 1.05f) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                        scale = newScale
                         val maxPanX = (newScale - 1f) * size.width / 2f
                         val maxPanY = (newScale - 1f) * size.height / 2f
                         offset = Offset(
                             (offset.x + pan.x).coerceIn(-maxPanX, maxPanX),
                             (offset.y + pan.y).coerceIn(-maxPanY, maxPanY)
                         )
-                    } else {
-                        offset = Offset.Zero
-                        // When at 1x scale, dragging right-to-left at newest photo returns to camera!
-                        if (pan.x < -35f) {
-                            onSwipeAtNewestEdge()
-                        }
                     }
                 }
-            }
-            .clickable { onToggleChrome() },
+            },
         contentAlignment = Alignment.Center
     ) {
         val bmp = bitmap

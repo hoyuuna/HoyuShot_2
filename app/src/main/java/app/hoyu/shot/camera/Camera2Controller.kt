@@ -68,6 +68,8 @@ class Camera2Controller(
     var currentNoiseReduction = NoiseReductionMode.FAST
     var currentSharpness = SharpnessMode.NORMAL
     var targetResolution: Pair<Int, Int>? = null
+    var deviceOrientationDegrees: Int = 0
+    private var lastJpegOrientation: Int = 0
 
     var lastMeasuredIso = 100
     var lastMeasuredShutter = 10_000_000L
@@ -560,6 +562,17 @@ class Camera2Controller(
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, 100.toByte())
 
+            // Correct EXIF orientation for portrait / landscape holding
+            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val isFacingFront = chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+            val jpegOrientation = if (isFacingFront) {
+                (sensorOrientation + deviceOrientationDegrees) % 360
+            } else {
+                (sensorOrientation - deviceOrientationDegrees + 360) % 360
+            }
+            lastJpegOrientation = jpegOrientation
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
                     session: CameraCaptureSession,
@@ -628,11 +641,12 @@ class Camera2Controller(
             val shutterStr = HardwareCapabilities.formatShutterSpeed(
                 if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
             )
+            val isPortrait = (lastJpegOrientation == 90 || lastJpegOrientation == 270)
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = false,
-                width = image.width,
-                height = image.height,
+                width = if (isPortrait) image.height else image.width,
+                height = if (isPortrait) image.width else image.height,
                 iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
                 focalLength = "1x",
@@ -665,6 +679,7 @@ class Camera2Controller(
         uri?.let { destUri ->
             context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
                 val dngCreator = DngCreator(characteristics, captureResult)
+                dngCreator.setOrientation(lastJpegOrientation)
                 dngCreator.writeImage(outputStream, image)
                 dngCreator.close()
             }

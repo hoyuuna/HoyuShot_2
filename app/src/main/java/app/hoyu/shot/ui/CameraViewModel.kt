@@ -77,6 +77,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             orientationListener.rotationDegrees.collect { deg ->
                 horizonSensor.currentUiRotationDegrees = deg
+                cameraController.deviceOrientationDegrees = deg.toInt()
                 _uiState.update { it.copy(uiRotationDegrees = deg) }
             }
         }
@@ -94,7 +95,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val initialCameraId = defaultLens?.cameraId ?: "0"
         val caps = inspector.inspectCamera(initialCameraId)
 
-        val initResolutions = computeAvailableResolutions(caps, AspectRatio.RATIO_4_3)
+        val initRatio = try { AspectRatio.valueOf(settingsRepo.savedAspectRatio) } catch (e: Exception) { AspectRatio.RATIO_4_3 }
+        val initResolutions = computeAvailableResolutions(caps, initRatio)
         val defaultRes = initResolutions.firstOrNull()
         if (defaultRes != null) {
             cameraController.targetResolution = Pair(defaultRes.width, defaultRes.height)
@@ -124,7 +126,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else SharpnessMode.NORMAL
 
         val initGrid = try { GridMode.valueOf(settingsRepo.savedGridMode) } catch (e: Exception) { GridMode.NONE }
-        val initRatio = try { AspectRatio.valueOf(settingsRepo.savedAspectRatio) } catch (e: Exception) { AspectRatio.RATIO_4_3 }
         val initHist = settingsRepo.savedHistogramVisible
         val initHorizon = settingsRepo.savedHorizonVisible
         val initPeaking = settingsRepo.savedPeakingEnabled

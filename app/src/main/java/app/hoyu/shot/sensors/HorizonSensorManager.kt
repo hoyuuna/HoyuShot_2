@@ -76,8 +76,8 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
         val rollDegrees = when (currentUiRotationDegrees) {
             90f -> {
                 // Landscape right (charging port on the right, top points left):
-                // User down is -gx, user right is -gy.
-                Math.toDegrees(atan2(-normGy.toDouble(), -normGx.toDouble())).toFloat()
+                // User down is +gx, user right is -gy.
+                Math.toDegrees(atan2(-normGy.toDouble(), normGx.toDouble())).toFloat()
             }
             180f -> {
                 // Portrait inverted:
@@ -86,8 +86,8 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
             }
             270f -> {
                 // Landscape left (charging port on the left, top points right):
-                // User down is +gx, user right is +gy.
-                Math.toDegrees(atan2(normGy.toDouble(), normGx.toDouble())).toFloat()
+                // User down is -gx, user right is +gy.
+                Math.toDegrees(atan2(normGy.toDouble(), -normGx.toDouble())).toFloat()
             }
             else -> {
                 // Portrait 0° (normal):

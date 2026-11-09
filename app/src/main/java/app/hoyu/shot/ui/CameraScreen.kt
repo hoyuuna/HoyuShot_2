@@ -425,11 +425,21 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // ProShot-style Gallery Viewer (Swiping left-to-right enters, matching the gesture!)
+        // ProShot-style Gallery Viewer (Animated with swipe direction)
         AnimatedVisibility(
             visible = uiState.isGalleryVisible && uiState.recentPhotos.isNotEmpty(),
-            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+            enter = when (uiState.uiRotationDegrees) {
+                90f -> slideInVertically(initialOffsetY = { -it }) + fadeIn()
+                180f -> slideInHorizontally(initialOffsetX = { it }) + fadeIn()
+                270f -> slideInVertically(initialOffsetY = { it }) + fadeIn()
+                else -> slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
+            },
+            exit = when (uiState.uiRotationDegrees) {
+                90f -> slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+                180f -> slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+                270f -> slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                else -> slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+            }
         ) {
             GalleryViewer(
                 photos = uiState.recentPhotos,
@@ -586,9 +596,9 @@ private fun ViewfinderPreviewContent(
                         // Calculate drag in user's visual frame of reference:
                         // In ALL orientations, dragging left-to-right from user's perspective triggers gallery!
                         val userHorizontalDrag = when (uiState.uiRotationDegrees) {
-                            90f -> -dragAmount.y // screen top-to-bottom is user's left-to-right
+                            90f -> dragAmount.y // screen top-to-bottom is user's left-to-right
                             180f -> -dragAmount.x // screen right-to-left is user's left-to-right
-                            270f -> dragAmount.y // screen bottom-to-top is user's left-to-right
+                            270f -> -dragAmount.y // screen bottom-to-top is user's left-to-right
                             else -> dragAmount.x // screen left-to-right is user's left-to-right
                         }
                         accumulator += userHorizontalDrag
@@ -653,14 +663,14 @@ private fun ViewfinderPreviewContent(
         // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
 
-        // Live Histogram: Only shown if enabled in settings, safe padding preventing overlay
+        // Live Histogram: Strictly at TopStart corner
         if (uiState.isHistogramVisible) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(
-                        top = if (uiState.uiRotationDegrees != 0f) 80.dp else if (isOverlayMode) 60.dp else 14.dp,
-                        start = if (uiState.uiRotationDegrees != 0f) 64.dp else 14.dp
+                        top = if (isOverlayMode) 52.dp else 12.dp,
+                        start = 12.dp
                     )
                     .rotate(animatedRotation)
                     .clip(shape)
@@ -672,18 +682,18 @@ private fun ViewfinderPreviewContent(
             }
         }
 
-        // EV Position Alert Badge: ALWAYS at the bottom of the user's view inside the preview!
+        // EV Position Alert Badge: In portrait sits above lens switcher; in the other 3 orientations sits close to the bottom edge
         if (uiState.evCompensationIndex != 0) {
             val alertAlignment = when (uiState.uiRotationDegrees) {
-                90f -> Alignment.CenterStart
+                90f -> Alignment.CenterEnd
                 180f -> Alignment.TopCenter
-                270f -> Alignment.CenterEnd
+                270f -> Alignment.CenterStart
                 else -> Alignment.BottomCenter
             }
             val alertPadding = when (uiState.uiRotationDegrees) {
-                90f -> Modifier.padding(start = 20.dp)
-                180f -> Modifier.padding(top = 56.dp)
-                270f -> Modifier.padding(end = 20.dp)
+                90f -> Modifier.padding(end = 12.dp)
+                180f -> Modifier.padding(top = 12.dp)
+                270f -> Modifier.padding(start = 12.dp)
                 else -> Modifier.padding(bottom = 56.dp)
             }
             Box(
@@ -785,6 +795,7 @@ private fun BottomControlsContent(
             // Quick Gallery Thumbnail
             QuickThumbnail(
                 photoInfo = uiState.lastCapturedPhoto,
+                rotationDegrees = animatedRotation,
                 onClick = onOpenGallery
             )
 
