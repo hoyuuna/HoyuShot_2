@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.ui.components
+package app.hoyu.shot.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
@@ -25,49 +25,40 @@ fun HorizonLevelIndicator(
     Canvas(modifier = modifier.fillMaxSize()) {
         val centerX = size.width / 2f
         val centerY = size.height / 2f
-        val halfLineWidth = size.width * 0.18f
 
-        // Center reticle dot
-        drawCircle(
-            color = levelColor,
-            radius = 3.5f,
-            center = Offset(centerX, centerY)
-        )
+        val boxWidth = 140f
+        val boxHeight = 70f
+        val tickLen = 8f
+        val strokeW = 1.8f
+        val guideColor = Color(0x66FFFFFF)
 
-        // Center cross brackets
-        drawLine(
-            color = Color(0x66FFFFFF),
-            start = Offset(centerX - 15f, centerY),
-            end = Offset(centerX + 15f, centerY),
-            strokeWidth = 2f
-        )
-        drawLine(
-            color = Color(0x66FFFFFF),
-            start = Offset(centerX, centerY - 15f),
-            end = Offset(centerX, centerY + 15f),
-            strokeWidth = 2f
-        )
+        // Left bracket with tick
+        val leftX = centerX - boxWidth / 2f
+        val rightX = centerX + boxWidth / 2f
+        val topY = centerY - boxHeight / 2f
+        val bottomY = centerY + boxHeight / 2f
 
-        // Dynamic Horizon line rotating with roll angle
+        // Left bracket: top corner, bottom corner, middle tick
+        drawLine(guideColor, Offset(leftX, topY), Offset(leftX, bottomY), strokeW)
+        drawLine(guideColor, Offset(leftX, topY), Offset(leftX + tickLen, topY), strokeW)
+        drawLine(guideColor, Offset(leftX, bottomY), Offset(leftX + tickLen, bottomY), strokeW)
+        drawLine(guideColor, Offset(leftX, centerY), Offset(leftX + tickLen * 1.5f, centerY), strokeW)
+
+        // Right bracket: top corner, bottom corner, middle tick
+        drawLine(guideColor, Offset(rightX, topY), Offset(rightX, bottomY), strokeW)
+        drawLine(guideColor, Offset(rightX, topY), Offset(rightX - tickLen, topY), strokeW)
+        drawLine(guideColor, Offset(rightX, bottomY), Offset(rightX - tickLen, bottomY), strokeW)
+        drawLine(guideColor, Offset(rightX, centerY), Offset(rightX - tickLen * 1.5f, centerY), strokeW)
+
+        // Center Horizon Level Line rotating with roll degrees
         rotate(degrees = -orientation.rollDegrees, pivot = Offset(centerX, centerY)) {
-            // Left wing
             drawLine(
                 color = levelColor,
-                start = Offset(centerX - halfLineWidth - 30f, centerY),
-                end = Offset(centerX - 30f, centerY),
-                strokeWidth = 3f,
-                cap = StrokeCap.Round
-            )
-
-            // Right wing
-            drawLine(
-                color = levelColor,
-                start = Offset(centerX + 30f, centerY),
-                end = Offset(centerX + halfLineWidth + 30f, centerY),
-                strokeWidth = 3f,
+                start = Offset(leftX + 4f, centerY),
+                end = Offset(rightX - 4f, centerY),
+                strokeWidth = 2.5f,
                 cap = StrokeCap.Round
             )
         }
     }
 }
-
