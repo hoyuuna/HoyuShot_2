@@ -15,18 +15,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.ExposureMode
+import kotlinx.coroutines.delay
 
 @Composable
 fun ModeDialSelectorModal(
@@ -41,6 +43,17 @@ fun ModeDialSelectorModal(
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
+    // 8-second auto-close timer starting from the exact moment user lifts finger off the popup
+    var isFingerTouching by remember { mutableStateOf(false) }
+    var touchReleaseEpoch by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(touchReleaseEpoch, isFingerTouching, visible) {
+        if (visible && !isFingerTouching) {
+            delay(8000)
+            onDismiss()
+        }
+    }
+
     val modes = listOf(
         ExposureMode.AUTO,
         ExposureMode.PROGRAM,
@@ -51,12 +64,27 @@ fun ModeDialSelectorModal(
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
-        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
+        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.88f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
         modifier = modifier.padding(16.dp)
     ) {
         Box(
-            modifier = Modifier.rotate(rotationDegrees),
+            modifier = Modifier
+                .rotate(rotationDegrees)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            val touching = event.changes.any { it.pressed }
+                            if (touching != isFingerTouching) {
+                                isFingerTouching = touching
+                                if (!touching) {
+                                    touchReleaseEpoch = System.currentTimeMillis()
+                                }
+                            }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
             Column(

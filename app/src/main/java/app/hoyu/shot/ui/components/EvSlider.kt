@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -204,6 +205,22 @@ fun DedicatedBottomEvBar(
     }
 }
 
+fun Modifier.rotateBounds(degrees: Float): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val normDeg = ((degrees % 360f) + 360f) % 360f
+    val isRotated = (normDeg in 45f..135f) || (normDeg in 225f..315f)
+    val layoutW = if (isRotated) placeable.height else placeable.width
+    val layoutH = if (isRotated) placeable.width else placeable.height
+    layout(layoutW, layoutH) {
+        placeable.placeRelativeWithLayer(
+            x = (layoutW - placeable.width) / 2,
+            y = (layoutH - placeable.height) / 2
+        ) {
+            rotationZ = degrees
+        }
+    }
+}
+
 @Composable
 fun EvPositionAlertBadge(
     evIndex: Int,
@@ -219,7 +236,7 @@ fun EvPositionAlertBadge(
 
     Box(
         modifier = modifier
-            .rotate(rotationDegrees)
+            .rotateBounds(rotationDegrees)
             .clip(shape)
             .background(Color(0xD909090B)) // Translucent Nothing Dark
             .border(1.dp, Color(0xFFE11D48), shape) // Nothing Red border

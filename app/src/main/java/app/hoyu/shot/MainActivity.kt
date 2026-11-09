@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot
+package app.hoyu.shot
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -41,6 +41,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Keep screen on continuously while app is open
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // Immersive DSLR Fullscreen Viewfinder
         WindowCompat.setDecorFitsSystemWindows(window, false)

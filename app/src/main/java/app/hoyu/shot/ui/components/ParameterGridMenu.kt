@@ -47,11 +47,13 @@ fun <T> ParameterGridMenu(
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
-    // 5-second inactivity auto-close timer
-    var interactionTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(interactionTimestamp, visible) {
-        if (visible) {
-            delay(5000)
+    // 8-second auto-close timer starting from the exact moment user lifts finger off the popup
+    var isFingerTouching by remember { mutableStateOf(false) }
+    var touchReleaseEpoch by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(touchReleaseEpoch, isFingerTouching) {
+        if (!isFingerTouching) {
+            delay(8000)
             onDismiss()
         }
     }
@@ -59,7 +61,21 @@ fun <T> ParameterGridMenu(
     Box(
         modifier = modifier
             .padding(16.dp)
-            .rotate(rotationDegrees),
+            .rotate(rotationDegrees)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        val touching = event.changes.any { it.pressed }
+                        if (touching != isFingerTouching) {
+                            isFingerTouching = touching
+                            if (!touching) {
+                                touchReleaseEpoch = System.currentTimeMillis()
+                            }
+                        }
+                    }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
             Column(

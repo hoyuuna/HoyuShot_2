@@ -47,10 +47,13 @@ fun FormatMenu(
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
-    var interactionEpoch by remember { mutableStateOf(0L) }
-    LaunchedEffect(interactionEpoch, visible) {
-        if (visible) {
-            delay(5000)
+    // 8-second auto-close timer starting from the exact moment user lifts finger off the popup
+    var isFingerTouching by remember { mutableStateOf(false) }
+    var touchReleaseEpoch by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(touchReleaseEpoch, isFingerTouching) {
+        if (!isFingerTouching) {
+            delay(8000)
             onDismiss()
         }
     }
@@ -59,12 +62,27 @@ fun FormatMenu(
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
-        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
+        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.88f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
         modifier = modifier.padding(16.dp)
     ) {
         Box(
-            modifier = Modifier.rotate(rotationDegrees),
+            modifier = Modifier
+                .rotate(rotationDegrees)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            val touching = event.changes.any { it.pressed }
+                            if (touching != isFingerTouching) {
+                                isFingerTouching = touching
+                                if (!touching) {
+                                    touchReleaseEpoch = System.currentTimeMillis()
+                                }
+                            }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
             Column(

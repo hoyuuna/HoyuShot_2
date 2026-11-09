@@ -106,7 +106,25 @@ fun HorizonLevelIndicator(
                 cap = StrokeCap.Round
             )
 
-            // 3. Center Rotating Roll Line
+            // Center Level Reference Crosshair (Xiaomi style): turns Nothing Red when perfectly level
+            val crosshairColor = if (orientation.isLevel) Color(0xFFE11D48) else Color(0x66FFFFFF)
+            val crosshairSize = 10f
+            drawLine(
+                color = crosshairColor,
+                start = Offset(centerX - crosshairSize, centerY),
+                end = Offset(centerX + crosshairSize, centerY),
+                strokeWidth = if (orientation.isLevel) 3f else 1.8f,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = crosshairColor,
+                start = Offset(centerX, centerY - crosshairSize),
+                end = Offset(centerX, centerY + crosshairSize),
+                strokeWidth = if (orientation.isLevel) 3f else 1.8f,
+                cap = StrokeCap.Round
+            )
+
+            // 4. Center Rotating Roll Line
             rotate(degrees = -orientation.rollDegrees, pivot = Offset(centerX, centerY)) {
                 drawLine(
                     color = rollColor,

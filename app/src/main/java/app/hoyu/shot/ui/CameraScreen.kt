@@ -55,6 +55,13 @@ fun CameraScreen(
     var isSettingsDialogVisible by remember { mutableStateOf(false) }
     var isFormatMenuVisible by remember { mutableStateOf(false) }
     var activeParamMenu by remember { mutableStateOf<DialParameter?>(null) }
+    // Maintain last non-null parameter card so the exit animation (scale + fade) renders smoothly
+    var displayedParamMenu by remember { mutableStateOf<DialParameter?>(null) }
+    LaunchedEffect(activeParamMenu) {
+        if (activeParamMenu != null) {
+            displayedParamMenu = activeParamMenu
+        }
+    }
 
     // Intercept system Back button so it navigates internally inside the app
     BackHandler(
@@ -325,7 +332,7 @@ fun CameraScreen(
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
             modifier = Modifier.align(Alignment.Center)
         ) {
-            when (activeParamMenu) {
+            when (displayedParamMenu) {
                 DialParameter.SHUTTER -> {
                     val shutterSpeeds = listOf(
                         125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
@@ -666,26 +673,25 @@ private fun ViewfinderPreviewContent(
         // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
 
-        // Live Histogram: Dynamically positioned in user's top-left corner without overlapping UI
+        // Live Histogram: Strictly positioned in user's bottom-left corner across all 4 orientations
         if (uiState.isHistogramVisible) {
             val histAlignment = when (uiState.uiRotationDegrees) {
-                90f -> Alignment.TopEnd
-                180f -> Alignment.BottomEnd
-                270f -> Alignment.BottomStart
-                else -> Alignment.TopStart
+                90f -> Alignment.TopStart
+                180f -> Alignment.TopEnd
+                270f -> Alignment.BottomEnd
+                else -> Alignment.BottomStart
             }
-            val topPad = if (isOverlayMode) 84.dp else 14.dp
             val histPadding = when (uiState.uiRotationDegrees) {
-                90f -> Modifier.padding(top = topPad, end = 14.dp)
-                180f -> Modifier.padding(bottom = 14.dp, end = 14.dp)
-                270f -> Modifier.padding(bottom = 14.dp, start = 14.dp)
-                else -> Modifier.padding(top = topPad, start = 14.dp)
+                90f -> Modifier.padding(start = 14.dp, top = 14.dp)
+                180f -> Modifier.padding(end = 14.dp, top = 14.dp)
+                270f -> Modifier.padding(end = 14.dp, bottom = 14.dp)
+                else -> Modifier.padding(start = 14.dp, bottom = 14.dp)
             }
             Box(
                 modifier = Modifier
                     .align(histAlignment)
                     .then(histPadding)
-                    .rotate(animatedRotation)
+                    .rotateBounds(animatedRotation)
                     .clip(shape)
                     .background(Color(0x77000000))
                     .border(1.dp, Color(0x33FFFFFF), shape)
