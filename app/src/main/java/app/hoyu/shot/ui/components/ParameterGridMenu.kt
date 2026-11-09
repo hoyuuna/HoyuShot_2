@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -131,7 +132,7 @@ fun <T> ParameterGridMenu(
                         .border(1.dp, autoBorderColor, shape)
                         .clickable {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            interactionTimestamp = System.currentTimeMillis()
+                            touchReleaseEpoch = System.currentTimeMillis()
                             onAutoSelected()
                         }
                         .padding(12.dp),
@@ -215,7 +216,7 @@ fun <T> ParameterGridMenu(
                                         .border(1.dp, itemBorderColor, shape)
                                         .clickable {
                                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                            interactionTimestamp = System.currentTimeMillis()
+                                            touchReleaseEpoch = System.currentTimeMillis()
                                             onItemSelected(item)
                                         }
                                         .padding(horizontal = 10.dp),

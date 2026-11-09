@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -150,7 +151,7 @@ fun FormatMenu(
                                     )
                                     .clickable {
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        interactionEpoch = System.currentTimeMillis()
+                                        touchReleaseEpoch = System.currentTimeMillis()
                                         onResolutionSelected(res)
                                     }
                                     .padding(horizontal = 10.dp),
@@ -198,7 +199,7 @@ fun FormatMenu(
                                     )
                                     .clickable {
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        interactionEpoch = System.currentTimeMillis()
+                                        touchReleaseEpoch = System.currentTimeMillis()
                                         onFormatSelected(fmt)
                                     }
                                     .padding(horizontal = 12.dp),
