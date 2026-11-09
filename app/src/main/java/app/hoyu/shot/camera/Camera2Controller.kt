@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Size
 import android.view.Surface
 import app.hoyu.shot.camera.analyzer.HistogramAnalyzer
 import app.hoyu.shot.model.*
@@ -54,18 +55,22 @@ class Camera2Controller(
     private var isAeLocked = false
     private var isAfLocked = false
 
-    private var currentExposureMode = ExposureMode.AUTO
-    private var currentIso = 100
-    private var currentShutterNanos = 10_000_000L
-    private var currentFocusDistance = 0f
-    private var currentIsManualFocus = false
-    private var currentEvIndex = 0
-    private var currentWbPreset = WhiteBalancePreset.AUTO
-    private var currentKelvin = 5500
-    private var currentZoomRatio = 1.0f
-    private var currentFlashMode = FlashMode.OFF
-    private var currentNoiseReduction = NoiseReductionMode.FAST
-    private var currentSharpness = SharpnessMode.NORMAL
+    var currentExposureMode = ExposureMode.AUTO
+    var currentIso = 100
+    var currentShutterNanos = 10_000_000L
+    var currentFocusDistance = 0f
+    var currentIsManualFocus = false
+    var currentEvIndex = 0
+    var currentWbPreset = WhiteBalancePreset.AUTO
+    var currentKelvin = 5500
+    var currentZoomRatio = 1.0f
+    var currentFlashMode = FlashMode.OFF
+    var currentNoiseReduction = NoiseReductionMode.FAST
+    var currentSharpness = SharpnessMode.NORMAL
+    var targetResolution: Pair<Int, Int>? = null
+
+    var lastMeasuredIso = 100
+    var lastMeasuredShutter = 10_000_000L
 
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
     val capabilities: StateFlow<HardwareCapabilities?> = _capabilities.asStateFlow()
@@ -126,7 +131,7 @@ class Camera2Controller(
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     cameraDevice = null
-                    onError("Camera error: $error")
+                    onError("Camera error code: $error")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -182,21 +187,26 @@ class Camera2Controller(
         val matchingJpeg = jpegSizes.filter {
             Math.abs((it.width.toDouble() / it.height.toDouble()) - targetRatioVal) < 0.05
         }
-        val largestJpeg = (if (matchingJpeg.isNotEmpty()) matchingJpeg else jpegSizes.toList())
-            .maxByOrNull { it.width * it.height }
 
-        if (largestJpeg != null) {
-            jpegImageReader = ImageReader.newInstance(
-                largestJpeg.width, largestJpeg.height, ImageFormat.JPEG, 2
-            ).apply {
-                setOnImageAvailableListener({ reader ->
-                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    backgroundHandler?.post {
-                        saveJpegImage(image)
-                        image.close()
-                    }
-                }, backgroundHandler)
-            }
+        val chosenJpegSize: Size = if (targetResolution != null) {
+            val (w, h) = targetResolution!!
+            matchingJpeg.find { it.width == w && it.height == h }
+                ?: matchingJpeg.maxByOrNull { it.width * it.height }
+                ?: Size(4000, 3000)
+        } else {
+            matchingJpeg.maxByOrNull { it.width * it.height } ?: Size(4000, 3000)
+        }
+
+        jpegImageReader = ImageReader.newInstance(
+            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 2
+        ).apply {
+            setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                backgroundHandler?.post {
+                    saveJpegImage(image)
+                    image.close()
+                }
+            }, backgroundHandler)
         }
 
         // 3. RAW_SENSOR stream
@@ -251,6 +261,8 @@ class Camera2Controller(
             super.onCaptureCompleted(session, request, result)
             val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
             val shutter = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            lastMeasuredIso = iso
+            lastMeasuredShutter = shutter
             onFrameMetadata(iso, shutter)
         }
     }
@@ -268,8 +280,9 @@ class Camera2Controller(
             val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 ?: Rect(0, 0, 4000, 3000)
 
-            val sensorX = (normY * activeArray.width()).toInt().coerceIn(0, activeArray.width())
-            val sensorY = ((1f - normX) * activeArray.height()).toInt().coerceIn(0, activeArray.height())
+            // Convert normalized screen coords (0..1) to sensor active array
+            val sensorX = (normX * activeArray.width()).toInt().coerceIn(0, activeArray.width())
+            val sensorY = (normY * activeArray.height()).toInt().coerceIn(0, activeArray.height())
 
             val halfBox = (activeArray.width() * 0.08f).toInt()
             val meteringBox = Rect(
@@ -373,23 +386,35 @@ class Camera2Controller(
                 }
             }
 
-            // 2. Exposure Mode
+            // 2. Exposure Mode calculation (Fixing dark preview bug!)
             when (currentExposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
+                    // Fully automated AE with user EV compensation
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                     builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, currentEvIndex)
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
+                    // Lock Shutter, dynamically balance ISO using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+                    val minIso = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.lower ?: 50
+                    val maxIso = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.upper ?: 6400
+                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(100.0 * 10_000_000.0)
+                    val dynIso = (targetExposure / currentShutterNanos.toDouble()).toInt().coerceIn(minIso, maxIso)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, dynIso)
                 }
                 ExposureMode.ISO_PRIORITY -> {
+                    // Lock ISO, dynamically balance Shutter using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
+                    val minShutter = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.lower ?: 100_000L
+                    val maxShutter = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.upper ?: 1_000_000_000L
+                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(100.0 * 10_000_000.0)
+                    val dynShutter = (targetExposure / currentIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
                 }
                 ExposureMode.MANUAL -> {
+                    // Full manual control
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
@@ -562,23 +587,34 @@ class Camera2Controller(
 
         val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         uri?.let { destUri ->
+            var writtenBytes = 0L
             context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
                 val buffer = image.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
                 outputStream.write(bytes)
+                writtenBytes = bytes.size.toLong()
             }
 
-            val shutterStr = HardwareCapabilities.formatShutterSpeed(currentShutterNanos)
+            val chars = currentCharacteristics
+            val apertures = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+            val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
+
+            val shutterStr = HardwareCapabilities.formatShutterSpeed(
+                if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
+            )
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = false,
                 width = image.width,
                 height = image.height,
-                iso = currentIso,
+                iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
                 focalLength = "1x",
-                timestamp = System.currentTimeMillis()
+                timestamp = System.currentTimeMillis(),
+                fileName = fileName,
+                fileSizeBytes = writtenBytes,
+                aperture = ap
             )
             onPhotoSaved(info)
         }
@@ -608,16 +644,24 @@ class Camera2Controller(
                 dngCreator.close()
             }
 
-            val shutterStr = HardwareCapabilities.formatShutterSpeed(currentShutterNanos)
+            val apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+            val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
+
+            val shutterStr = HardwareCapabilities.formatShutterSpeed(
+                if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
+            )
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = true,
                 width = image.width,
                 height = image.height,
-                iso = currentIso,
+                iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
                 focalLength = "1x",
-                timestamp = System.currentTimeMillis()
+                timestamp = System.currentTimeMillis(),
+                fileName = fileName,
+                fileSizeBytes = 24_000_000L,
+                aperture = ap
             )
             onPhotoSaved(info)
         }

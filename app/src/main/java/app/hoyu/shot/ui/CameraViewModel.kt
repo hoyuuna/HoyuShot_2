@@ -1,6 +1,8 @@
 package app.hoyu.shot.ui
 
 import android.app.Application
+import android.net.Uri
+import android.provider.MediaStore
 import android.view.Surface
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.AndroidViewModel
@@ -11,6 +13,7 @@ import app.hoyu.shot.data.SettingsRepository
 import app.hoyu.shot.model.*
 import app.hoyu.shot.sensors.DeviceOrientationListener
 import app.hoyu.shot.sensors.HorizonSensorManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,10 +49,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         },
         onPhotoSaved = { info ->
-            _uiState.update {
-                it.copy(
+            _uiState.update { current ->
+                val updatedList = listOf(info) + current.recentPhotos.filter { p -> p.uriString != info.uriString }
+                current.copy(
                     isCapturing = false,
-                    lastCapturedPhoto = info
+                    lastCapturedPhoto = info,
+                    recentPhotos = updatedList
                 )
             }
         },
@@ -59,6 +64,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     init {
+        loadRecentPhotos()
+
         // Collect horizon tilt angle in real time
         viewModelScope.launch {
             horizonSensor.orientationFlow.collect { orientation ->
@@ -270,13 +277,145 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun openReviewDialog() {
-        if (_uiState.value.lastCapturedPhoto != null) {
-            _uiState.update { it.copy(isReviewDialogVisible = true) }
+        if (_uiState.value.recentPhotos.isNotEmpty() || _uiState.value.lastCapturedPhoto != null) {
+            _uiState.update { it.copy(isGalleryVisible = true) }
         }
     }
 
     fun closeReviewDialog() {
-        _uiState.update { it.copy(isReviewDialogVisible = false) }
+        _uiState.update { it.copy(isGalleryVisible = false) }
+    }
+
+    fun openGallery() {
+        if (_uiState.value.recentPhotos.isNotEmpty() || _uiState.value.lastCapturedPhoto != null) {
+            _uiState.update { it.copy(isGalleryVisible = true) }
+        }
+    }
+
+    fun closeGallery() {
+        _uiState.update { it.copy(isGalleryVisible = false) }
+    }
+
+    fun loadRecentPhotos() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = mutableListOf<CapturedPhotoInfo>()
+            try {
+                val projection = arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.WIDTH,
+                    MediaStore.Images.Media.HEIGHT,
+                    MediaStore.Images.Media.SIZE,
+                    MediaStore.Images.Media.DATE_ADDED
+                )
+                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+                val cursor = getApplication<Application>().contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    null,
+                    null,
+                    sortOrder
+                )
+                cursor?.use { c ->
+                    val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                    val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                    val widthCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
+                    val heightCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+                    val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                    val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+
+                    var count = 0
+                    while (c.moveToNext() && count < 25) {
+                        val id = c.getLong(idCol)
+                        val name = c.getString(nameCol) ?: "IMG.jpg"
+                        val w = c.getInt(widthCol)
+                        val h = c.getInt(heightCol)
+                        val sz = c.getLong(sizeCol)
+                        val date = c.getLong(dateCol) * 1000L
+                        val contentUri = android.content.ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        )
+
+                        list.add(
+                            CapturedPhotoInfo(
+                                uriString = contentUri.toString(),
+                                isRaw = name.endsWith(".dng", ignoreCase = true),
+                                width = if (w > 0) w else 4000,
+                                height = if (h > 0) h else 3000,
+                                iso = 100,
+                                shutterSpeed = "1/120s",
+                                focalLength = "1x",
+                                timestamp = date,
+                                fileName = name,
+                                fileSizeBytes = sz,
+                                aperture = "f/1.8"
+                            )
+                        )
+                        count++
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            _uiState.update { current ->
+                current.copy(
+                    recentPhotos = list,
+                    lastCapturedPhoto = list.firstOrNull() ?: current.lastCapturedPhoto
+                )
+            }
+        }
+    }
+
+    fun deletePhoto(info: CapturedPhotoInfo) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(info.uriString)
+                getApplication<Application>().contentResolver.delete(uri, null, null)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            _uiState.update { current ->
+                val remaining = current.recentPhotos.filter { it.uriString != info.uriString }
+                current.copy(
+                    recentPhotos = remaining,
+                    lastCapturedPhoto = remaining.firstOrNull(),
+                    isGalleryVisible = remaining.isNotEmpty()
+                )
+            }
+        }
+    }
+
+    fun setCaptureFormat(format: CaptureFormat) {
+        val willCaptureRaw = format == CaptureFormat.RAW || format == CaptureFormat.RAW_JPEG
+        _uiState.update {
+            it.copy(
+                captureFormat = format,
+                captureRaw = willCaptureRaw
+            )
+        }
+        if (_uiState.value.isResumeSettingsEnabled) {
+            settingsRepo.savedRawEnabled = willCaptureRaw
+        }
+    }
+
+    fun setMegapixels(mp: String) {
+        val targetSize = when (mp) {
+            "12.6 MP" -> Pair(4096, 3072)
+            "6.2 MP" -> Pair(2880, 2160)
+            "2.8 MP" -> Pair(1920, 1440)
+            else -> null
+        }
+        _uiState.update { it.copy(selectedMegapixels = mp) }
+        cameraController.targetResolution = targetSize
+
+        val surface = activeSurface
+        if (surface != null) {
+            cameraController.switchCamera(_uiState.value.currentCameraId, surface, _uiState.value.aspectRatio) { w, h ->
+                _uiState.update { it.copy(previewSize = Pair(w, h)) }
+            }
+        }
     }
 
     fun selectLens(lens: LensItem) {
@@ -346,7 +485,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setExposureMode(mode: ExposureMode) {
-        _uiState.update { it.copy(exposureMode = mode) }
+        val currActualIso = _uiState.value.actualIso.coerceAtLeast(50)
+        val currActualShutter = _uiState.value.actualShutterSpeedNanos.coerceAtLeast(500_000L)
+
+        _uiState.update { current ->
+            current.copy(
+                exposureMode = mode,
+                iso = if (mode == ExposureMode.MANUAL || mode == ExposureMode.ISO_PRIORITY || current.iso <= 50) currActualIso else current.iso,
+                shutterSpeedNanos = if (mode == ExposureMode.MANUAL || mode == ExposureMode.SHUTTER_PRIORITY || current.shutterSpeedNanos <= 500_000L) currActualShutter else current.shutterSpeedNanos
+            )
+        }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedExposureMode = mode.name
         applyCurrentSettings()
     }

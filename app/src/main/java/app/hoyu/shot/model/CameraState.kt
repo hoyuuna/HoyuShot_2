@@ -13,6 +13,8 @@ data class HistogramData(
 data class HorizonOrientation(
     val pitchDegrees: Float = 0f,
     val rollDegrees: Float = 0f,
+    val isRollLevel: Boolean = false,
+    val isPitchLevel: Boolean = false,
     val isLevel: Boolean = false
 )
 
@@ -74,6 +76,8 @@ data class CameraUiState(
     val actualShutterSpeedNanos: Long = 10_000_000L,
 
     // Capture, Timer & Format options
+    val captureFormat: CaptureFormat = CaptureFormat.JPEG,
+    val selectedMegapixels: String = "12.6 MP",
     val captureRaw: Boolean = false,
     val isCapturing: Boolean = false,
     val timerMode: TimerMode = TimerMode.OFF,
@@ -82,7 +86,9 @@ data class CameraUiState(
 
     // Gallery & Review
     val lastCapturedPhoto: CapturedPhotoInfo? = null,
+    val recentPhotos: List<CapturedPhotoInfo> = emptyList(),
     val isReviewDialogVisible: Boolean = false,
+    val isGalleryVisible: Boolean = false,
 
     // Viewfinder Pro Aids & Overlays
     val gridMode: GridMode = GridMode.NONE,

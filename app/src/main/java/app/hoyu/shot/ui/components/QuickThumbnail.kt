@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -18,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,6 +33,7 @@ fun QuickThumbnail(
 ) {
     val context = LocalContext.current
     var bitmap by remember(photoInfo?.uriString) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val shape = RoundedCornerShape(2.dp)
 
     LaunchedEffect(photoInfo?.uriString) {
         val uriStr = photoInfo?.uriString ?: return@LaunchedEffect
@@ -53,9 +54,9 @@ fun QuickThumbnail(
     Box(
         modifier = modifier
             .size(52.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .border(2.dp, Color(0x66FFFFFF), RoundedCornerShape(8.dp))
-            .background(Color(0x80000000))
+            .clip(shape)
+            .background(Color(0x33000000))
+            .border(1.dp, Color(0xFF27272A), shape)
             .clickable(enabled = photoInfo != null) { onClick() },
         contentAlignment = Alignment.Center
     ) {
@@ -71,17 +72,23 @@ fun QuickThumbnail(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .background(Color(0xFFFFD600), RoundedCornerShape(topStart = 4.dp))
+                        .background(Color(0xFFE11D48), shape)
                         .padding(horizontal = 3.dp, vertical = 1.dp)
                 ) {
-                    Text(text = "RAW", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        text = "RAW",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
         } else {
             Box(
                 modifier = Modifier
                     .size(24.dp)
-                    .border(1.5.dp, Color(0x66FFFFFF), CircleShape)
+                    .border(1.dp, Color(0xFF52525B), shape)
             )
         }
     }

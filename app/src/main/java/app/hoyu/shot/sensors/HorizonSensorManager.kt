@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.sensors
+package app.hoyu.shot.sensors
 
 import android.content.Context
 import android.hardware.Sensor
@@ -49,10 +49,13 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
                 val ax = event.values[0] / norm
                 val ay = event.values[1] / norm
                 val roll = Math.toDegrees(Math.atan2(ax.toDouble(), ay.toDouble())).toFloat()
+                val isRollLevel = abs(roll) <= 1.0f
                 _orientationFlow.value = HorizonOrientation(
                     pitchDegrees = 0f,
                     rollDegrees = roll,
-                    isLevel = abs(roll) < 1.0f
+                    isRollLevel = isRollLevel,
+                    isPitchLevel = true,
+                    isLevel = isRollLevel
                 )
                 return
             }
@@ -64,12 +67,15 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
         val pitch = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
         val roll = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
 
-        // Within 1 degree is considered perfectly level (like professional cameras)
-        val isLevel = abs(roll) <= 1.0f && abs(pitch) <= 1.0f
+        val isRollLevel = abs(roll) <= 1.0f
+        val isPitchLevel = abs(pitch) <= 1.5f
+        val isLevel = isRollLevel && isPitchLevel
 
         _orientationFlow.value = HorizonOrientation(
             pitchDegrees = pitch,
             rollDegrees = roll,
+            isRollLevel = isRollLevel,
+            isPitchLevel = isPitchLevel,
             isLevel = isLevel
         )
     }

@@ -10,7 +10,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 @Composable
 fun <T> ParameterGridMenu(
@@ -36,12 +37,19 @@ fun <T> ParameterGridMenu(
     val view = LocalView.current
     val shape = RoundedCornerShape(2.dp)
 
+    // 5-second inactivity timer that resets on user interaction
+    var interactionTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(interactionTimestamp) {
+        delay(5000)
+        onDismiss()
+    }
+
     Column(
         modifier = modifier
-            .width(170.dp)
-            .heightIn(max = 310.dp)
+            .width(180.dp)
+            .heightIn(max = 320.dp)
             .clip(shape)
-            .background(Color(0xFF09090B)) // shadcn zinc-950
+            .background(Color(0xF209090B)) // shadcn zinc-950 semi-translucent
             .border(1.dp, Color(0xFF27272A), shape)
             .padding(8.dp)
     ) {
@@ -56,25 +64,25 @@ fun <T> ParameterGridMenu(
             Text(
                 text = title.uppercase(),
                 color = Color(0xFFFAFAFA),
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 letterSpacing = 1.sp
             )
             Text(
                 text = "[X]",
-                color = Color(0xFF71717A),
-                fontSize = 9.sp,
+                color = Color(0xFFA1A1AA),
+                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .clickable { onDismiss() }
-                    .padding(2.dp)
+                    .padding(4.dp)
             )
         }
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // 2-Column Scrollable Grid of Values
+        // 2-Column Scrollable Grid of Values (Keeps open when tapped)
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             modifier = Modifier
@@ -87,7 +95,7 @@ fun <T> ParameterGridMenu(
                 val isSelected = !isAutoSelected && item == selectedItem
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .clip(shape)
                         .background(if (isSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
                         .border(
@@ -97,7 +105,9 @@ fun <T> ParameterGridMenu(
                         )
                         .clickable {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            interactionTimestamp = System.currentTimeMillis()
                             onItemSelected(item)
+                            // Popup stays open per user requirement!
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -118,7 +128,7 @@ fun <T> ParameterGridMenu(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp)
+                .height(38.dp)
                 .clip(shape)
                 .background(if (isAutoSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
                 .border(
@@ -128,7 +138,9 @@ fun <T> ParameterGridMenu(
                 )
                 .clickable {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    interactionTimestamp = System.currentTimeMillis()
                     onAutoSelected()
+                    // Popup stays open per user requirement!
                 },
             contentAlignment = Alignment.Center
         ) {

@@ -21,6 +21,104 @@ import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.*
 
 @Composable
+fun HorizontalParameterStrip(
+    uiState: CameraUiState,
+    activeParam: DialParameter?,
+    rotationDegrees: Float,
+    onParamClick: (DialParameter) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+
+    val isFocusActive = activeParam == DialParameter.FOCUS
+    val isFocusManual = uiState.isManualFocusEnabled
+    val focusText = if (isFocusManual) {
+        String.format("%.1fD", uiState.focusDistanceDiopters)
+    } else "AF"
+
+    val isShutterActive = activeParam == DialParameter.SHUTTER
+    val isShutterManual = uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY || uiState.exposureMode == ExposureMode.MANUAL
+    val shutterText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY) {
+        HardwareCapabilities.formatShutterSpeed(uiState.actualShutterSpeedNanos)
+    } else {
+        HardwareCapabilities.formatShutterSpeed(uiState.shutterSpeedNanos)
+    }
+
+    val isIsoActive = activeParam == DialParameter.ISO
+    val isIsoManual = uiState.exposureMode == ExposureMode.ISO_PRIORITY || uiState.exposureMode == ExposureMode.MANUAL
+    val isoText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY) {
+        "${uiState.actualIso}"
+    } else {
+        "${uiState.iso}"
+    }
+
+    val isWbActive = activeParam == DialParameter.WHITE_BALANCE
+    val isWbManual = uiState.whiteBalancePreset != WhiteBalancePreset.AUTO
+    val wbText = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) {
+        "${uiState.kelvinTemperature}K"
+    } else {
+        uiState.whiteBalancePreset.label
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        StripItem(
+            label = "AF",
+            value = focusText,
+            isActive = isFocusActive,
+            isManual = isFocusManual,
+            rotationDegrees = rotationDegrees,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onParamClick(DialParameter.FOCUS)
+            },
+            modifier = Modifier.weight(1f)
+        )
+        StripItem(
+            label = "SEC",
+            value = shutterText,
+            isActive = isShutterActive,
+            isManual = isShutterManual,
+            rotationDegrees = rotationDegrees,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onParamClick(DialParameter.SHUTTER)
+            },
+            modifier = Modifier.weight(1f)
+        )
+        StripItem(
+            label = "ISO",
+            value = isoText,
+            isActive = isIsoActive,
+            isManual = isIsoManual,
+            rotationDegrees = rotationDegrees,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onParamClick(DialParameter.ISO)
+            },
+            modifier = Modifier.weight(1f)
+        )
+        StripItem(
+            label = "WB",
+            value = wbText,
+            isActive = isWbActive,
+            isManual = isWbManual,
+            rotationDegrees = rotationDegrees,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onParamClick(DialParameter.WHITE_BALANCE)
+            },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
 fun ParameterStrip(
     uiState: CameraUiState,
     activeParam: DialParameter?,
@@ -30,80 +128,81 @@ fun ParameterStrip(
 ) {
     val view = LocalView.current
 
+    val isFocusActive = activeParam == DialParameter.FOCUS
+    val isFocusManual = uiState.isManualFocusEnabled
+    val focusText = if (isFocusManual) {
+        String.format("%.1fD", uiState.focusDistanceDiopters)
+    } else "AF"
+
+    val isShutterActive = activeParam == DialParameter.SHUTTER
+    val isShutterManual = uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY || uiState.exposureMode == ExposureMode.MANUAL
+    val shutterText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY) {
+        HardwareCapabilities.formatShutterSpeed(uiState.actualShutterSpeedNanos)
+    } else {
+        HardwareCapabilities.formatShutterSpeed(uiState.shutterSpeedNanos)
+    }
+
+    val isIsoActive = activeParam == DialParameter.ISO
+    val isIsoManual = uiState.exposureMode == ExposureMode.ISO_PRIORITY || uiState.exposureMode == ExposureMode.MANUAL
+    val isoText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY) {
+        "${uiState.actualIso}"
+    } else {
+        "${uiState.iso}"
+    }
+
+    val isWbActive = activeParam == DialParameter.WHITE_BALANCE
+    val isWbManual = uiState.whiteBalancePreset != WhiteBalancePreset.AUTO
+    val wbText = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) {
+        "${uiState.kelvinTemperature}K"
+    } else {
+        uiState.whiteBalancePreset.label
+    }
+
     Column(
         modifier = modifier
-            .width(54.dp)
+            .width(58.dp)
             .padding(vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // 1. Focus Pill
-        val isFocusActive = activeParam == DialParameter.FOCUS
-        val focusText = if (uiState.isManualFocusEnabled) {
-            String.format("%.1fD", uiState.focusDistanceDiopters)
-        } else "AF"
-
         StripItem(
             label = "AF",
             value = focusText,
             isActive = isFocusActive,
+            isManual = isFocusManual,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.FOCUS)
             }
         )
-
-        // 2. Shutter Speed Pill
-        val isShutterActive = activeParam == DialParameter.SHUTTER
-        val shutterText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY) {
-            HardwareCapabilities.formatShutterSpeed(uiState.actualShutterSpeedNanos)
-        } else {
-            HardwareCapabilities.formatShutterSpeed(uiState.shutterSpeedNanos)
-        }
-
         StripItem(
             label = "SEC",
             value = shutterText,
             isActive = isShutterActive,
+            isManual = isShutterManual,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.SHUTTER)
             }
         )
-
-        // 3. ISO Pill
-        val isIsoActive = activeParam == DialParameter.ISO
-        val isoText = if (uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY) {
-            "${uiState.actualIso}"
-        } else {
-            "${uiState.iso}"
-        }
-
         StripItem(
             label = "ISO",
             value = isoText,
             isActive = isIsoActive,
+            isManual = isIsoManual,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.ISO)
             }
         )
-
-        // 4. White Balance Pill
-        val isWbActive = activeParam == DialParameter.WHITE_BALANCE
-        val wbText = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) {
-            "${uiState.kelvinTemperature}K"
-        } else {
-            uiState.whiteBalancePreset.label
-        }
-
         StripItem(
             label = "WB",
             value = wbText,
             isActive = isWbActive,
+            isManual = isWbManual,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -118,21 +217,31 @@ private fun StripItem(
     label: String,
     value: String,
     isActive: Boolean,
+    isManual: Boolean,
     rotationDegrees: Float,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(2.dp)
+
+    val borderColor = when {
+        isActive -> Color.White
+        isManual -> Color(0xFFE11D48)
+        else -> Color(0xFF27272A)
+    }
+
+    val backgroundColor = when {
+        isActive -> Color(0xFFFAFAFA)
+        isManual -> Color(0x33E11D48)
+        else -> Color(0x33000000)
+    }
+
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(44.dp)
+        modifier = modifier
+            .height(48.dp)
             .clip(shape)
-            .background(if (isActive) Color(0xFFFAFAFA) else Color(0x33000000))
-            .border(
-                1.dp,
-                if (isActive) Color.White else Color(0xFF27272A),
-                shape
-            )
+            .background(backgroundColor)
+            .border(1.dp, borderColor, shape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
@@ -141,17 +250,29 @@ private fun StripItem(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = label,
-                color = if (isActive) Color(0xFF71717A) else Color(0xFF71717A),
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = label,
+                    color = if (isActive) Color(0xFF71717A) else if (isManual) Color(0xFFFF4D6D) else Color(0xFF71717A),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                if (isManual && !isActive) {
+                    Box(
+                        modifier = Modifier
+                            .size(3.dp)
+                            .background(Color(0xFFE11D48), RoundedCornerShape(1.dp))
+                    )
+                }
+            }
             Text(
                 text = value,
-                color = if (isActive) Color.Black else Color(0xFFFAFAFA),
-                fontSize = 10.sp,
+                color = if (isActive) Color.Black else if (isManual) Color(0xFFFAFAFA) else Color(0xFFE4E4E7),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1

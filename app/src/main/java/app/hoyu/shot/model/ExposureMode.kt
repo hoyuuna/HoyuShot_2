@@ -57,6 +57,12 @@ enum class SharpnessMode(val label: String, val tag: String) {
     HIGH("+1", "SHARP +1")
 }
 
+enum class CaptureFormat(val label: String) {
+    JPEG("JPEG"),
+    RAW("RAW"),
+    RAW_JPEG("RAW+JPEG")
+}
+
 data class CapturedPhotoInfo(
     val uriString: String,
     val isRaw: Boolean,
@@ -65,5 +71,8 @@ data class CapturedPhotoInfo(
     val iso: Int,
     val shutterSpeed: String,
     val focalLength: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val fileName: String = "",
+    val fileSizeBytes: Long = 0L,
+    val aperture: String = "f/1.8"
 )
