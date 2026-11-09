@@ -7,7 +7,6 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.os.Build
-import android.util.Range
 import android.util.Rational
 import app.hoyu.shot.model.HardwareCapabilities
 import app.hoyu.shot.model.LensItem
@@ -23,7 +22,7 @@ class CameraHardwareInspector(private val context: Context) {
         try {
             val cameraIds = cameraManager.cameraIdList
 
-            // 1. First, analyze Back Cameras
+            // 1. Discover Back Camera(s) and their optical lenses
             val backCameraIds = cameraIds.filter { id ->
                 try {
                     val chars = cameraManager.getCameraCharacteristics(id)
@@ -33,20 +32,18 @@ class CameraHardwareInspector(private val context: Context) {
                 }
             }
 
-            // Look at Primary Back Camera (usually "0")
             val primaryBackId = backCameraIds.firstOrNull()
             if (primaryBackId != null) {
                 val chars = cameraManager.getCameraCharacteristics(primaryBackId)
                 val primary35mm = calculate35mmEquivalent(chars)
 
-                // Check zoom ratio range on Android 11+
                 val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                 } else null
 
                 val detectedOpticalRatios = mutableListOf<Float>()
 
-                // Check physical cameras inside logical camera (API 28+)
+                // A. Check Physical Camera Sensors under Logical Multi-Camera (Android 9+)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val physicalIds = chars.physicalCameraIds
                     for (physId in physicalIds) {
@@ -54,47 +51,61 @@ class CameraHardwareInspector(private val context: Context) {
                             val physChars = cameraManager.getCameraCharacteristics(physId)
                             val phys35mm = calculate35mmEquivalent(physChars)
                             if (primary35mm > 0f) {
-                                val ratio = phys35mm / primary35mm
-                                detectedOpticalRatios.add(ratio)
+                                val opticalRatio = phys35mm / primary35mm
+                                detectedOpticalRatios.add(opticalRatio)
                             }
                         } catch (e: Exception) {
-                            // ignore physical camera read error
+                            // physical camera read fallback
                         }
                     }
                 }
 
-                // If zoom range is supported, verify min zoom (e.g. 0.6x or 0.5x)
-                if (zoomRange != null) {
-                    if (zoomRange.lower < 0.95f) {
-                        detectedOpticalRatios.add(zoomRange.lower)
-                    }
-                    if (zoomRange.upper >= 3.0f && !detectedOpticalRatios.any { it in 2.8f..3.5f }) {
-                        // Standard telephoto step if device reports telephoto zoom range
-                        detectedOpticalRatios.add(3.2f)
+                // B. Check LENS_INFO_AVAILABLE_FOCAL_LENGTHS on the Logical Camera
+                // Android CDD mandates that logical multi-camera lists focal lengths of all physical lenses
+                val availableFocalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                if (availableFocalLengths != null && availableFocalLengths.size > 1) {
+                    // Base 1x focal length is usually between 3.5mm and 6.5mm
+                    val baseFocal = availableFocalLengths.firstOrNull { it in 3.5f..6.5f }
+                        ?: availableFocalLengths.firstOrNull()
+                        ?: 5.0f
+
+                    for (focal in availableFocalLengths) {
+                        val opticalRatio = focal / baseFocal
+                        if (!detectedOpticalRatios.any { Math.abs(it - opticalRatio) < 0.15f }) {
+                            detectedOpticalRatios.add(opticalRatio)
+                        }
                     }
                 }
 
-                // If no physical cameras detected but there are other standalone back camera IDs in cameraIdList
-                if (detectedOpticalRatios.isEmpty() && backCameraIds.size > 1) {
-                    for (otherId in backCameraIds) {
-                        if (otherId != primaryBackId) {
+                // C. Check Other Discrete Back Camera IDs in cameraIdList (e.g. Sony, older devices)
+                for (otherId in backCameraIds) {
+                    if (otherId != primaryBackId) {
+                        try {
                             val otherChars = cameraManager.getCameraCharacteristics(otherId)
                             val other35mm = calculate35mmEquivalent(otherChars)
                             if (primary35mm > 0f) {
-                                val ratio = other35mm / primary35mm
-                                val label = formatZoomLabel(ratio)
-                                lenses.add(LensItem(id = "cam_$otherId", label = label, cameraId = otherId, zoomRatio = 1.0f, isFront = false))
+                                val opticalRatio = other35mm / primary35mm
+                                detectedOpticalRatios.add(opticalRatio)
                             }
+                        } catch (e: Exception) {
+                            // ignore
                         }
                     }
                 }
 
-                // Always add 1x
+                // D. Check Hardware Minimum Zoom Ratio (e.g. 0.5x, 0.6x)
+                if (zoomRange != null && zoomRange.lower < 0.95f) {
+                    // The HAL explicitly defines the minimum optical zoom ratio
+                    detectedOpticalRatios.removeAll { it < 0.95f } // replace approximation with exact HAL value
+                    detectedOpticalRatios.add(zoomRange.lower)
+                }
+
+                // Always ensure 1x (Base standard wide) exists
                 if (!detectedOpticalRatios.any { it in 0.95f..1.05f }) {
                     detectedOpticalRatios.add(1.0f)
                 }
 
-                // Sort ratios ascending (e.g. 0.6, 1.0, 3.2)
+                // Sort and deduplicate by formatted label (e.g. 0.6x, 1x, 2x, 3.2x, 5x, 10x)
                 val sortedRatios = detectedOpticalRatios.sorted().distinctBy { formatZoomLabel(it) }
 
                 for (ratio in sortedRatios) {
@@ -102,7 +113,7 @@ class CameraHardwareInspector(private val context: Context) {
                     val clampedRatio = if (zoomRange != null) ratio.coerceIn(zoomRange.lower, zoomRange.upper) else ratio
                     lenses.add(
                         LensItem(
-                            id = "back_zoom_${label}",
+                            id = "back_lens_${label}",
                             label = label,
                             cameraId = primaryBackId,
                             zoomRatio = clampedRatio,
@@ -139,7 +150,6 @@ class CameraHardwareInspector(private val context: Context) {
             e.printStackTrace()
         }
 
-        // Fallback default if detection is empty
         if (lenses.isEmpty()) {
             lenses.add(LensItem("default_1x", "1x", "0", 1.0f, false))
         }
@@ -148,17 +158,11 @@ class CameraHardwareInspector(private val context: Context) {
     }
 
     private fun formatZoomLabel(ratio: Float): String {
+        val rounded = (ratio * 10f).roundToInt() / 10f
         return when {
-            ratio in 0.55f..0.65f -> "0.6x"
-            ratio in 0.45f..0.54f -> "0.5x"
-            ratio in 0.9f..1.1f -> "1x"
-            ratio in 1.9f..2.2f -> "2x"
-            ratio in 3.1f..3.4f -> "3.2x"
-            ratio in 2.8f..3.09f -> "3x"
-            ratio in 4.7f..5.3f -> "5x"
-            ratio < 1.0f -> String.format("%.1fx", ratio)
-            ratio % 1.0f == 0f -> "${ratio.toInt()}x"
-            else -> String.format("%.1fx", ratio)
+            rounded < 1.0f -> "${rounded}x"
+            rounded % 1.0f == 0f -> "${rounded.toInt()}x"
+            else -> "${rounded}x"
         }
     }
 
