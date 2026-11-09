@@ -7,7 +7,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hoyu.shot.camera.Camera2Controller
 import app.hoyu.shot.camera.CameraHardwareInspector
+import app.hoyu.shot.data.SettingsRepository
 import app.hoyu.shot.model.*
+import app.hoyu.shot.sensors.DeviceOrientationListener
 import app.hoyu.shot.sensors.HorizonSensorManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -23,7 +25,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
     private val horizonSensor = HorizonSensorManager(application)
+    private val orientationListener = DeviceOrientationListener(application)
     private val inspector = CameraHardwareInspector(application)
+    private val settingsRepo = SettingsRepository(application)
 
     private var activeSurface: Surface? = null
     private var timerJob: Job? = null
@@ -62,9 +66,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // Collect device orientation to rotate buttons and icons in-place
+        viewModelScope.launch {
+            orientationListener.rotationDegrees.collect { deg ->
+                _uiState.update { it.copy(uiRotationDegrees = deg) }
+            }
+        }
+
         // Discover all physical and logical lenses (0.6x, 1x, 3.2x, Front)
         val allLenses = inspector.discoverAllLenses()
-        val defaultLens = allLenses.find { !it.isFront && it.label == "1x" }
+        val isResume = settingsRepo.isResumeSettingsEnabled
+
+        val targetCamId = if (isResume) settingsRepo.savedCameraId else "0"
+        val defaultLens = allLenses.find { it.cameraId == targetCamId && !it.isFront }
+            ?: allLenses.find { !it.isFront && it.label == "1x" }
             ?: allLenses.firstOrNull { !it.isFront }
             ?: allLenses.firstOrNull()
 
@@ -73,6 +88,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         val minZoom = allLenses.filter { !it.isFront }.minOfOrNull { it.zoomRatio } ?: 0.6f
         val maxZoom = 30.0f
+
+        val initMode = if (isResume) {
+            try { ExposureMode.valueOf(settingsRepo.savedExposureMode) } catch (e: Exception) { ExposureMode.AUTO }
+        } else ExposureMode.AUTO
+
+        val initIso = if (isResume) settingsRepo.savedIso else (caps?.isoRange?.lower ?: 100)
+        val initShutter = if (isResume) settingsRepo.savedShutterNanos else (caps?.shutterSpeedRangeNanos?.lower ?: 10_000_000L)
+        val initFocus = if (isResume) settingsRepo.savedFocusDiopters else 0f
+        val initIsManualFocus = if (isResume) settingsRepo.savedIsManualFocus else false
+        val initEv = if (isResume) settingsRepo.savedEvIndex else 0
+        val initKelvin = if (isResume) settingsRepo.savedKelvin else 5500
+        val initRaw = if (isResume) settingsRepo.savedRawEnabled else false
+
+        val initNr = if (isResume) {
+            try { NoiseReductionMode.valueOf(settingsRepo.savedNoiseReduction) } catch (e: Exception) { NoiseReductionMode.FAST }
+        } else NoiseReductionMode.FAST
+
+        val initSharp = if (isResume) {
+            try { SharpnessMode.valueOf(settingsRepo.savedSharpness) } catch (e: Exception) { SharpnessMode.NORMAL }
+        } else SharpnessMode.NORMAL
 
         _uiState.update {
             it.copy(
@@ -83,18 +118,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 minZoomRatio = minZoom,
                 maxZoomRatio = maxZoom,
                 capabilities = caps,
-                iso = caps?.isoRange?.lower ?: 100,
-                shutterSpeedNanos = caps?.shutterSpeedRangeNanos?.lower ?: 10_000_000L
+                exposureMode = initMode,
+                iso = initIso,
+                shutterSpeedNanos = initShutter,
+                focusDistanceDiopters = initFocus,
+                isManualFocusEnabled = initIsManualFocus,
+                evCompensationIndex = initEv,
+                kelvinTemperature = initKelvin,
+                captureRaw = initRaw,
+                isResumeSettingsEnabled = isResume,
+                noiseReductionMode = initNr,
+                sharpnessMode = initSharp
             )
         }
     }
 
     fun startSensors() {
         horizonSensor.start()
+        orientationListener.start()
     }
 
     fun stopSensors() {
         horizonSensor.stop()
+        orientationListener.stop()
     }
 
     fun startCamera(previewSurface: Surface) {
@@ -134,6 +180,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 } else current
             }
         }
+    }
+
+    fun toggleResumeSettings() {
+        val next = !settingsRepo.isResumeSettingsEnabled
+        settingsRepo.isResumeSettingsEnabled = next
+        _uiState.update { it.copy(isResumeSettingsEnabled = next) }
+        if (next) persistCurrentSettings()
+    }
+
+    fun cycleNoiseReduction() {
+        val next = when (_uiState.value.noiseReductionMode) {
+            NoiseReductionMode.OFF -> NoiseReductionMode.FAST
+            NoiseReductionMode.FAST -> NoiseReductionMode.HIGH_QUALITY
+            NoiseReductionMode.HIGH_QUALITY -> NoiseReductionMode.OFF
+        }
+        _uiState.update { it.copy(noiseReductionMode = next) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedNoiseReduction = next.name
+        applyCurrentSettings()
+    }
+
+    fun cycleSharpness() {
+        val next = when (_uiState.value.sharpnessMode) {
+            SharpnessMode.OFF -> SharpnessMode.NORMAL
+            SharpnessMode.NORMAL -> SharpnessMode.HIGH
+            SharpnessMode.HIGH -> SharpnessMode.OFF
+        }
+        _uiState.update { it.copy(sharpnessMode = next) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedSharpness = next.name
+        applyCurrentSettings()
     }
 
     fun toggleAeLock() {
@@ -223,6 +298,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     capabilities = caps
                 )
             }
+            if (_uiState.value.isResumeSettingsEnabled) {
+                settingsRepo.savedCameraId = lens.cameraId
+            }
             cameraController.switchCamera(lens.cameraId, surface, _uiState.value.aspectRatio) { width, height ->
                 _uiState.update { it.copy(previewSize = Pair(width, height)) }
             }
@@ -269,31 +347,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setExposureMode(mode: ExposureMode) {
         _uiState.update { it.copy(exposureMode = mode) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedExposureMode = mode.name
         applyCurrentSettings()
     }
 
     fun setIso(iso: Int) {
         _uiState.update { it.copy(iso = iso) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIso = iso
         applyCurrentSettings()
     }
 
     fun setShutterSpeedNanos(nanos: Long) {
         _uiState.update { it.copy(shutterSpeedNanos = nanos) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedShutterNanos = nanos
         applyCurrentSettings()
     }
 
     fun setFocusDistance(diopters: Float) {
         _uiState.update { it.copy(focusDistanceDiopters = diopters, isManualFocusEnabled = true) }
+        if (_uiState.value.isResumeSettingsEnabled) {
+            settingsRepo.savedFocusDiopters = diopters
+            settingsRepo.savedIsManualFocus = true
+        }
         applyCurrentSettings()
     }
 
     fun toggleAutoFocus() {
-        _uiState.update { it.copy(isManualFocusEnabled = !it.isManualFocusEnabled) }
+        val manual = !_uiState.value.isManualFocusEnabled
+        _uiState.update { it.copy(isManualFocusEnabled = manual) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIsManualFocus = manual
         applyCurrentSettings()
     }
 
     fun setEvCompensation(evIndex: Int) {
         _uiState.update { it.copy(evCompensationIndex = evIndex) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedEvIndex = evIndex
         applyCurrentSettings()
     }
 
@@ -304,15 +392,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setKelvin(kelvin: Int) {
         _uiState.update { it.copy(kelvinTemperature = kelvin, whiteBalancePreset = WhiteBalancePreset.CUSTOM_KELVIN) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedKelvin = kelvin
         applyCurrentSettings()
     }
 
     fun toggleRaw() {
-        _uiState.update { it.copy(captureRaw = !it.captureRaw) }
-    }
-
-    fun setActiveDial(param: DialParameter?) {
-        _uiState.update { it.copy(activeDialParameter = if (it.activeDialParameter == param) null else param) }
+        val next = !_uiState.value.captureRaw
+        _uiState.update { it.copy(captureRaw = next) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedRawEnabled = next
     }
 
     fun takePicture() {
@@ -335,6 +422,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun persistCurrentSettings() {
+        val s = _uiState.value
+        settingsRepo.savedCameraId = s.currentCameraId
+        settingsRepo.savedExposureMode = s.exposureMode.name
+        settingsRepo.savedIso = s.iso
+        settingsRepo.savedShutterNanos = s.shutterSpeedNanos
+        settingsRepo.savedFocusDiopters = s.focusDistanceDiopters
+        settingsRepo.savedIsManualFocus = s.isManualFocusEnabled
+        settingsRepo.savedEvIndex = s.evCompensationIndex
+        settingsRepo.savedKelvin = s.kelvinTemperature
+        settingsRepo.savedRawEnabled = s.captureRaw
+        settingsRepo.savedNoiseReduction = s.noiseReductionMode.name
+        settingsRepo.savedSharpness = s.sharpnessMode.name
+    }
+
     private fun applyCurrentSettings() {
         val s = _uiState.value
         cameraController.updateManualSettings(
@@ -347,7 +449,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             whiteBalancePreset = s.whiteBalancePreset,
             kelvin = s.kelvinTemperature,
             zoomRatio = s.currentZoomRatio,
-            flashMode = s.flashMode
+            flashMode = s.flashMode,
+            noiseReduction = s.noiseReductionMode,
+            sharpness = s.sharpnessMode
         )
     }
 

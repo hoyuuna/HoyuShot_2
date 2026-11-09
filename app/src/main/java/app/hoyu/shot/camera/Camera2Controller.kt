@@ -64,6 +64,8 @@ class Camera2Controller(
     private var currentKelvin = 5500
     private var currentZoomRatio = 1.0f
     private var currentFlashMode = FlashMode.OFF
+    private var currentNoiseReduction = NoiseReductionMode.FAST
+    private var currentSharpness = SharpnessMode.NORMAL
 
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
     val capabilities: StateFlow<HardwareCapabilities?> = _capabilities.asStateFlow()
@@ -124,7 +126,7 @@ class Camera2Controller(
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     cameraDevice = null
-                    onError("Camera error code: $error")
+                    onError("Camera error: $error")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -253,9 +255,6 @@ class Camera2Controller(
         }
     }
 
-    /**
-     * Tap to Focus and Meter on specific coordinate
-     */
     fun triggerTapToFocus(
         normX: Float,
         normY: Float,
@@ -269,7 +268,6 @@ class Camera2Controller(
             val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 ?: Rect(0, 0, 4000, 3000)
 
-            // Convert normalized (0..1) screen coordinates to sensor active array coordinates
             val sensorX = (normY * activeArray.width()).toInt().coerceIn(0, activeArray.width())
             val sensorY = ((1f - normX) * activeArray.height()).toInt().coerceIn(0, activeArray.height())
 
@@ -300,7 +298,6 @@ class Camera2Controller(
                             afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED
                     onFocusResult(isSuccess)
 
-                    // Resume repeating request with triggered region
                     builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
                     session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
                 }
@@ -332,7 +329,9 @@ class Camera2Controller(
         whiteBalancePreset: WhiteBalancePreset,
         kelvin: Int,
         zoomRatio: Float,
-        flashMode: FlashMode
+        flashMode: FlashMode,
+        noiseReduction: NoiseReductionMode,
+        sharpness: SharpnessMode
     ) {
         this.currentExposureMode = exposureMode
         this.currentIso = iso
@@ -344,6 +343,8 @@ class Camera2Controller(
         this.currentKelvin = kelvin
         this.currentZoomRatio = zoomRatio
         this.currentFlashMode = flashMode
+        this.currentNoiseReduction = noiseReduction
+        this.currentSharpness = sharpness
 
         applyAllSettingsInternal()
     }
@@ -415,18 +416,24 @@ class Camera2Controller(
 
             // 6. Flash / Torch
             when (currentFlashMode) {
-                FlashMode.OFF -> {
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                }
-                FlashMode.AUTO -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                }
-                FlashMode.ON -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
-                }
-                FlashMode.TORCH -> {
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-                }
+                FlashMode.OFF -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                FlashMode.AUTO -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                FlashMode.ON -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                FlashMode.TORCH -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+            }
+
+            // 7. Noise Reduction
+            when (currentNoiseReduction) {
+                NoiseReductionMode.OFF -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
+                NoiseReductionMode.FAST -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+                NoiseReductionMode.HIGH_QUALITY -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+            }
+
+            // 8. Edge Mode (Sharpness)
+            when (currentSharpness) {
+                SharpnessMode.OFF -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+                SharpnessMode.NORMAL -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                SharpnessMode.HIGH -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
             }
 
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
@@ -464,9 +471,6 @@ class Camera2Controller(
         return RggbChannelVector(r, g, g, b)
     }
 
-    /**
-     * Executes Still Photo Capture with Pre-capture Lock Routine
-     */
     fun takePicture(captureRaw: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
@@ -491,6 +495,8 @@ class Camera2Controller(
                 captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, preview.get(CaptureRequest.CONTROL_AF_MODE))
                 captureBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, preview.get(CaptureRequest.LENS_FOCUS_DISTANCE))
                 captureBuilder.set(CaptureRequest.CONTROL_AWB_MODE, preview.get(CaptureRequest.CONTROL_AWB_MODE))
+                captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, preview.get(CaptureRequest.NOISE_REDUCTION_MODE))
+                captureBuilder.set(CaptureRequest.EDGE_MODE, preview.get(CaptureRequest.EDGE_MODE))
 
                 // Copy zoom
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

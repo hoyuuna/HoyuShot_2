@@ -6,26 +6,28 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.hoyu.shot.model.CameraUiState
+import app.hoyu.shot.model.NoiseReductionMode
+import app.hoyu.shot.model.SharpnessMode
 
 @Composable
 fun SettingsDialog(
     uiState: CameraUiState,
+    onToggleResumeSettings: () -> Unit,
+    onCycleNoiseReduction: () -> Unit,
+    onCycleSharpness: () -> Unit,
     onToggleHistogram: () -> Unit,
     onToggleHorizon: () -> Unit,
     onTogglePeaking: () -> Unit,
@@ -33,16 +35,16 @@ fun SettingsDialog(
     onDismiss: () -> Unit
 ) {
     val view = LocalView.current
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(2.dp) // shadcn razor-sharp corner
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
-                .width(320.dp)
+                .width(340.dp)
                 .clip(shape)
-                .background(Color(0xE6141414))
-                .border(1.dp, Color(0x33FFFFFF), shape)
-                .padding(16.dp)
+                .background(Color(0xFF09090B)) // shadcn zinc-950
+                .border(1.dp, Color(0xFF27272A), shape) // zinc-800
+                .padding(18.dp)
         ) {
             // Header
             Row(
@@ -51,16 +53,18 @@ fun SettingsDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "CAMERA SETTINGS",
-                    color = Color(0xFFFFD600),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.2.sp
+                    text = "SYS // CONFIG",
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.5.sp
                 )
                 Text(
-                    text = "✕",
-                    color = Color(0x88FFFFFF),
-                    fontSize = 14.sp,
+                    text = "[ESC]",
+                    color = Color(0xFF71717A),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
                     modifier = Modifier
                         .clickable { onDismiss() }
                         .padding(4.dp)
@@ -69,50 +73,120 @@ fun SettingsDialog(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Storage Path Info
+            // 1. Resume Settings Row (Sticky Settings ON / OFF)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0x22FFFFFF))
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .border(1.dp, Color(0xFF27272A), shape)
+                    .background(Color(0xFF18181B))
+                    .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Folder,
-                    contentDescription = null,
-                    tint = Color(0xFFFFD600),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(text = "STORAGE PATH", color = Color(0x88FFFFFF), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "DCIM/HoyuShot", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "RESUME SETTINGS",
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = if (uiState.isResumeSettingsEnabled) "Preserves manual dials upon exit" else "Always boots fresh in Auto",
+                        color = Color(0xFF71717A),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(shape)
+                        .background(if (uiState.isResumeSettingsEnabled) Color(0xFFFAFAFA) else Color(0xFF27272A))
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onToggleResumeSettings()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = if (uiState.isResumeSettingsEnabled) "ON" else "OFF",
+                        color = if (uiState.isResumeSettingsEnabled) Color.Black else Color(0xFFA1A1AA),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // 2x2 Grid of Toggle Tiles
+            // 2. NR & SHARP Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Noise Reduction
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .background(Color(0xFF18181B))
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onCycleNoiseReduction()
+                        }
+                        .padding(10.dp)
+                ) {
+                    Text(text = "DENOISE (NR)", color = Color(0xFF71717A), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = uiState.noiseReductionMode.tag,
+                        color = if (uiState.noiseReductionMode != NoiseReductionMode.OFF) Color(0xFFFAFAFA) else Color(0xFFE11D48),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Sharpness
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .background(Color(0xFF18181B))
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onCycleSharpness()
+                        }
+                        .padding(10.dp)
+                ) {
+                    Text(text = "SHARPNESS", color = Color(0xFF71717A), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = uiState.sharpnessMode.tag,
+                        color = if (uiState.sharpnessMode != SharpnessMode.OFF) Color(0xFFFAFAFA) else Color(0xFFE11D48),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 3. Pro Tools 2x2 Grid
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingTile(
-                    title = "HISTOGRAM",
-                    icon = Icons.Default.BarChart,
-                    isEnabled = uiState.isHistogramVisible,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        onToggleHistogram()
-                    },
+                ShadcnToggleTile(
+                    label = "HISTOGRAM",
+                    isActive = uiState.isHistogramVisible,
+                    onClick = onToggleHistogram,
                     modifier = Modifier.weight(1f)
                 )
-                SettingTile(
-                    title = "HORIZON LEVEL",
-                    icon = Icons.Default.LineWeight,
-                    isEnabled = uiState.isHorizonLevelVisible,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        onToggleHorizon()
-                    },
+                ShadcnToggleTile(
+                    label = "HORIZON RETICLE",
+                    isActive = uiState.isHorizonLevelVisible,
+                    onClick = onToggleHorizon,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -120,73 +194,65 @@ fun SettingsDialog(
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingTile(
-                    title = "FOCUS PEAKING",
-                    icon = Icons.Default.CenterFocusStrong,
-                    isEnabled = uiState.isFocusPeakingEnabled,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        onTogglePeaking()
-                    },
+                ShadcnToggleTile(
+                    label = "FOCUS PEAKING",
+                    isActive = uiState.isFocusPeakingEnabled,
+                    onClick = onTogglePeaking,
                     modifier = Modifier.weight(1f)
                 )
-                SettingTile(
-                    title = "ZEBRA STRIPES",
-                    icon = Icons.Default.Warning,
-                    isEnabled = uiState.isZebraStripesEnabled,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        onToggleZebra()
-                    },
+                ShadcnToggleTile(
+                    label = "ZEBRA HIGHLIGHT",
+                    isActive = uiState.isZebraStripesEnabled,
+                    onClick = onToggleZebra,
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Storage Path
+            Text(
+                text = "STORAGE -> /DCIM/HoyuShot",
+                color = Color(0xFF52525B),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
 
 @Composable
-private fun SettingTile(
-    title: String,
-    icon: ImageVector,
-    isEnabled: Boolean,
+private fun ShadcnToggleTile(
+    label: String,
+    isActive: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(8.dp)
-    Column(
+    val view = LocalView.current
+    val shape = RoundedCornerShape(2.dp)
+    Row(
         modifier = modifier
-            .height(72.dp)
-            .clip(shape)
-            .background(if (isEnabled) Color(0x33FFD600) else Color(0x22222222))
-            .border(1.dp, if (isEnabled) Color(0xFFFFD600) else Color(0x22FFFFFF), shape)
-            .clickable { onClick() }
-            .padding(10.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .border(1.dp, if (isActive) Color(0xFF3F3F46) else Color(0xFF27272A), shape)
+            .background(if (isActive) Color(0xFF27272A) else Color(0xFF18181B))
+            .clickable {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onClick()
+            }
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isEnabled) Color(0xFFFFD600) else Color(0x88FFFFFF),
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = if (isEnabled) "ON" else "OFF",
-                color = if (isEnabled) Color(0xFFFFD600) else Color(0x66FFFFFF),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black
-            )
-        }
         Text(
-            text = title,
-            color = if (isEnabled) Color.White else Color(0xAAFFFFFF),
+            text = label,
+            color = if (isActive) Color(0xFFFAFAFA) else Color(0xFFA1A1AA),
             fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
+        )
+        Text(
+            text = if (isActive) "●" else "○",
+            color = if (isActive) Color(0xFFE11D48) else Color(0xFF52525B),
+            fontSize = 10.sp
         )
     }
 }

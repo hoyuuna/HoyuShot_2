@@ -35,6 +35,9 @@ data class CameraUiState(
     val currentCameraId: String = "0",
     val capabilities: HardwareCapabilities? = null,
 
+    // Dynamic In-place Element Rotation (0, 90, 180, 270)
+    val uiRotationDegrees: Float = 0f,
+
     // Multi-Camera & Optical Lenses
     val availableLenses: List<LensItem> = emptyList(),
     val currentLens: LensItem? = null,
@@ -61,6 +64,11 @@ data class CameraUiState(
     val whiteBalancePreset: WhiteBalancePreset = WhiteBalancePreset.AUTO,
     val kelvinTemperature: Int = 5500,
 
+    // Image Processing: NR & Sharpness
+    val noiseReductionMode: NoiseReductionMode = NoiseReductionMode.FAST,
+    val sharpnessMode: SharpnessMode = SharpnessMode.NORMAL,
+    val isResumeSettingsEnabled: Boolean = false,
+
     // Live Readout from Sensor
     val actualIso: Int = 100,
     val actualShutterSpeedNanos: Long = 10_000_000L,
@@ -78,7 +86,7 @@ data class CameraUiState(
 
     // Viewfinder Pro Aids & Overlays
     val gridMode: GridMode = GridMode.NONE,
-    val isHistogramVisible: Boolean = true,
+    val isHistogramVisible: Boolean = false,
     val isHorizonLevelVisible: Boolean = true,
     val isFocusPeakingEnabled: Boolean = false,
     val isZebraStripesEnabled: Boolean = false,

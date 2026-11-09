@@ -34,15 +34,15 @@ fun <T> ParameterGridMenu(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(2.dp)
 
     Column(
         modifier = modifier
-            .width(185.dp)
-            .heightIn(max = 320.dp)
+            .width(170.dp)
+            .heightIn(max = 310.dp)
             .clip(shape)
-            .background(Color(0xD9141414))
-            .border(1.dp, Color(0x44FFFFFF), shape)
+            .background(Color(0xFF09090B)) // shadcn zinc-950
+            .border(1.dp, Color(0xFF27272A), shape)
             .padding(8.dp)
     ) {
         // Title Header
@@ -55,22 +55,24 @@ fun <T> ParameterGridMenu(
         ) {
             Text(
                 text = title.uppercase(),
-                color = Color(0xFFFFD600),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
+                color = Color(0xFFFAFAFA),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
                 letterSpacing = 1.sp
             )
             Text(
-                text = "✕",
-                color = Color(0x88FFFFFF),
-                fontSize = 12.sp,
+                text = "[X]",
+                color = Color(0xFF71717A),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .clickable { onDismiss() }
-                    .padding(4.dp)
+                    .padding(2.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // 2-Column Scrollable Grid of Values
         LazyVerticalGrid(
@@ -85,13 +87,13 @@ fun <T> ParameterGridMenu(
                 val isSelected = !isAutoSelected && item == selectedItem
                 Box(
                     modifier = Modifier
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (isSelected) Color(0x33FFD600) else Color(0x33222222))
+                        .height(34.dp)
+                        .clip(shape)
+                        .background(if (isSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
                         .border(
                             1.dp,
-                            if (isSelected) Color(0xFFFFD600) else Color(0x22FFFFFF),
-                            RoundedCornerShape(4.dp)
+                            if (isSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
+                            shape
                         )
                         .clickable {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -101,9 +103,9 @@ fun <T> ParameterGridMenu(
                 ) {
                     Text(
                         text = formatItem(item),
-                        color = if (isSelected) Color(0xFFFFD600) else Color.White,
+                        color = if (isSelected) Color.Black else Color(0xFFFAFAFA),
                         fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -112,17 +114,17 @@ fun <T> ParameterGridMenu(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Large 2-slot AUTO Button at the bottom
+        // Wide AUTO Button spanning 2 columns
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (isAutoSelected) Color.White else Color(0x44222222))
+                .height(36.dp)
+                .clip(shape)
+                .background(if (isAutoSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
                 .border(
                     1.dp,
-                    if (isAutoSelected) Color.White else Color(0x44FFFFFF),
-                    RoundedCornerShape(4.dp)
+                    if (isAutoSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
+                    shape
                 )
                 .clickable {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -132,10 +134,11 @@ fun <T> ParameterGridMenu(
         ) {
             Text(
                 text = "AUTO",
-                color = if (isAutoSelected) Color.Black else Color.White,
-                fontSize = 12.sp,
+                color = if (isAutoSelected) Color.Black else Color(0xFFA1A1AA),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.5.sp
             )
         }
     }

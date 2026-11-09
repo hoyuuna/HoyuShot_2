@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -23,6 +24,7 @@ import app.hoyu.shot.model.*
 fun ParameterStrip(
     uiState: CameraUiState,
     activeParam: DialParameter?,
+    rotationDegrees: Float,
     onParamClick: (DialParameter) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -30,21 +32,22 @@ fun ParameterStrip(
 
     Column(
         modifier = modifier
-            .width(58.dp)
-            .padding(vertical = 4.dp),
+            .width(54.dp)
+            .padding(vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // 1. Focus Pill
         val isFocusActive = activeParam == DialParameter.FOCUS
         val focusText = if (uiState.isManualFocusEnabled) {
-            String.format("%.1f D", uiState.focusDistanceDiopters)
+            String.format("%.1fD", uiState.focusDistanceDiopters)
         } else "AF"
 
         StripItem(
             label = "AF",
             value = focusText,
             isActive = isFocusActive,
+            rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.FOCUS)
@@ -63,6 +66,7 @@ fun ParameterStrip(
             label = "SEC",
             value = shutterText,
             isActive = isShutterActive,
+            rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.SHUTTER)
@@ -81,6 +85,7 @@ fun ParameterStrip(
             label = "ISO",
             value = isoText,
             isActive = isIsoActive,
+            rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.ISO)
@@ -99,6 +104,7 @@ fun ParameterStrip(
             label = "WB",
             value = wbText,
             isActive = isWbActive,
+            rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onParamClick(DialParameter.WHITE_BALANCE)
@@ -112,36 +118,44 @@ private fun StripItem(
     label: String,
     value: String,
     isActive: Boolean,
+    rotationDegrees: Float,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(4.dp)
-    Column(
+    val shape = RoundedCornerShape(2.dp)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
+            .height(44.dp)
             .clip(shape)
-            .background(if (isActive) Color(0x66FFFFFF) else Color(0x33000000))
+            .background(if (isActive) Color(0xFFFAFAFA) else Color(0x33000000))
             .border(
                 1.dp,
-                if (isActive) Color.White else Color(0x33FFFFFF),
+                if (isActive) Color.White else Color(0xFF27272A),
                 shape
             )
-            .clickable { onClick() }
-            .padding(vertical = 4.dp, horizontal = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = label,
-            color = if (isActive) Color.Black else Color(0x88FFFFFF),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = value,
-            color = if (isActive) Color.Black else Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1
-        )
+        Column(
+            modifier = Modifier.rotate(rotationDegrees),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = label,
+                color = if (isActive) Color(0xFF71717A) else Color(0xFF71717A),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                text = value,
+                color = if (isActive) Color.Black else Color(0xFFFAFAFA),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1
+            )
+        }
     }
 }
