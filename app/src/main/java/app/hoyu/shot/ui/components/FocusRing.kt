@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.hoyu.shot.model.FocusState
@@ -50,11 +49,12 @@ fun FocusRingOverlay(
         label = "scale"
     )
 
+    // Strictly Nothing OS minimal palette: White focusing, Nothing Red locked!
     val ringColor = when (tapPoint.state) {
-        FocusState.FOCUSING -> Color(0xFFFFD600)
-        FocusState.LOCKED_SUCCESS -> Color(0xFF00E676)
-        FocusState.LOCKED_FAILED -> Color(0xFFFF1744)
-        FocusState.IDLE -> Color.White
+        FocusState.FOCUSING -> Color(0xFFFAFAFA)
+        FocusState.LOCKED_SUCCESS -> Color(0xFFE11D48)
+        FocusState.LOCKED_FAILED -> Color(0xFF71717A)
+        FocusState.IDLE -> Color(0xFFFAFAFA)
     }
 
     AnimatedVisibility(
@@ -98,8 +98,14 @@ fun FocusRingOverlay(
                 drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
                 drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
 
-                // Center dot
-                drawCircle(ringColor, radius = 2.5f, center = center)
+                // Center crosshair dot
+                if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+                    drawCircle(
+                        color = Color(0xFFE11D48),
+                        radius = 3f,
+                        center = center
+                    )
+                }
             }
         }
     }

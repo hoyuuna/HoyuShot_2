@@ -25,7 +25,7 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
 
     private val rotationMatrix = FloatArray(9)
 
-    // Current UI rotation degrees (0, 90, 180, 270)
+    // Current UI rotation degrees: 0 (portrait), 90 (landscape right), 180 (inverted), 270 (landscape left)
     var currentUiRotationDegrees: Float = 0f
 
     fun start() {
@@ -48,7 +48,6 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
             // In Android coordinate system, world gravity down [0, 0, -1] mapped to device coords:
-            // gx = -R[2], gy = -R[5], gz = -R[8]
             gx = -rotationMatrix[2]
             gy = -rotationMatrix[5]
             gz = -rotationMatrix[8]
@@ -71,20 +70,39 @@ class HorizonSensorManager(context: Context) : SensorEventListener {
         val pitchRad = asin(normGz.coerceIn(-1f, 1f).toDouble())
         val pitchDegrees = Math.toDegrees(pitchRad).toFloat()
 
-        // 2. Relative Roll adapting to phone orientation (Portrait vs Landscape):
-        // Screen orientation angle theta in degrees (-180 to 180)
-        val theta = Math.toDegrees(atan2(normGx.toDouble(), (-normGy).toDouble())).toFloat()
-        var rollDiff = (theta - currentUiRotationDegrees) % 360f
-        if (rollDiff > 180f) rollDiff -= 360f
-        if (rollDiff < -180f) rollDiff += 360f
+        // 2. Relative Roll adapting to user's current holding orientation:
+        // For each of the 4 cardinal phone orientations (0, 90, 180, 270):
+        // Compute the roll angle relative to the horizon in user coordinates.
+        val rollDegrees = when (currentUiRotationDegrees) {
+            90f -> {
+                // Landscape right (charging port on the right, top points left):
+                // User down is -gx, user right is -gy.
+                Math.toDegrees(atan2(-normGy.toDouble(), -normGx.toDouble())).toFloat()
+            }
+            180f -> {
+                // Portrait inverted:
+                // User down is +gy, user right is -gx.
+                Math.toDegrees(atan2(-normGx.toDouble(), normGy.toDouble())).toFloat()
+            }
+            270f -> {
+                // Landscape left (charging port on the left, top points right):
+                // User down is +gx, user right is +gy.
+                Math.toDegrees(atan2(normGy.toDouble(), normGx.toDouble())).toFloat()
+            }
+            else -> {
+                // Portrait 0° (normal):
+                // User down is -gy, user right is +gx.
+                Math.toDegrees(atan2(normGx.toDouble(), -normGy.toDouble())).toFloat()
+            }
+        }
 
-        val isRollLevel = abs(rollDiff) <= 1.0f
+        val isRollLevel = abs(rollDegrees) <= 1.0f
         val isPitchLevel = abs(pitchDegrees) <= 1.5f
         val isLevel = isRollLevel && isPitchLevel
 
         _orientationFlow.value = HorizonOrientation(
             pitchDegrees = pitchDegrees,
-            rollDegrees = rollDiff,
+            rollDegrees = rollDegrees,
             isRollLevel = isRollLevel,
             isPitchLevel = isPitchLevel,
             isLevel = isLevel

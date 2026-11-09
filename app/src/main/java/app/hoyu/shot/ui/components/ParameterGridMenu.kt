@@ -11,9 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -46,7 +45,7 @@ fun <T> ParameterGridMenu(
     val view = LocalView.current
     val shape = RoundedCornerShape(2.dp)
 
-    // 5-second inactivity timer that resets on user interaction
+    // 5-second inactivity auto-close timer
     var interactionTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(interactionTimestamp, visible) {
         if (visible) {
@@ -57,117 +56,136 @@ fun <T> ParameterGridMenu(
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.9f),
-        exit = fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.9f),
-        modifier = modifier
+        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
+        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
+        modifier = modifier.padding(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .rotate(rotationDegrees)
-                .width(190.dp)
-                .heightIn(max = 330.dp)
-                .clip(shape)
-                .background(Color(0xF509090B)) // shadcn zinc-950 semi-translucent
-                .border(1.dp, Color(0xFF27272A), shape)
-                .padding(8.dp)
+        Box(
+            modifier = Modifier.rotate(rotationDegrees),
+            contentAlignment = Alignment.Center
         ) {
-            // Title Header
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .width(250.dp)
+                    .heightIn(max = 240.dp)
+                    .clip(shape)
+                    .background(Color(0xF509090B)) // shadcn zinc-950
+                    .border(1.dp, Color(0xFF27272A), shape)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    text = title.uppercase(),
-                    color = Color(0xFFFAFAFA),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "[X]",
-                    color = Color(0xFFA1A1AA),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .clickable { onDismiss() }
-                        .padding(4.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // 2-Column Scrollable Grid of Values (Keeps open when tapped)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(items) { item ->
-                    val isSelected = !isAutoSelected && item == selectedItem
-                    Box(
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title.uppercase(),
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "[ESC]",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
                         modifier = Modifier
-                            .height(36.dp)
-                            .clip(shape)
-                            .background(if (isSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
-                            .border(
-                                1.dp,
-                                if (isSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
-                                shape
-                            )
-                            .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                interactionTimestamp = System.currentTimeMillis()
-                                onItemSelected(item)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = formatItem(item),
-                            color = if (isSelected) Color.Black else Color(0xFFFAFAFA),
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace
+                            .clickable { onDismiss() }
+                            .padding(2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                // Wide AUTO Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .clip(shape)
+                        .background(if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B))
+                        .border(
+                            1.dp,
+                            if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                            shape
+                        )
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            interactionTimestamp = System.currentTimeMillis()
+                            onAutoSelected()
+                        }
+                        .padding(horizontal = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AUTO",
+                        color = if (isAutoSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    if (isAutoSelected) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(shape)
+                                .background(Color(0xFFE11D48))
                         )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Wide AUTO Button spanning 2 columns
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-                    .clip(shape)
-                    .background(if (isAutoSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
-                    .border(
-                        1.dp,
-                        if (isAutoSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
-                        shape
-                    )
-                    .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        interactionTimestamp = System.currentTimeMillis()
-                        onAutoSelected()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "AUTO",
-                    color = if (isAutoSelected) Color.Black else Color(0xFFA1A1AA),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.5.sp
-                )
+                // Clean list of values matching Settings / Mode design
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(items) { item ->
+                        val isSelected = !isAutoSelected && item == selectedItem
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(30.dp)
+                                .clip(shape)
+                                .background(if (isSelected) Color(0x33E11D48) else Color(0xFF18181B))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                    shape
+                                )
+                                .clickable {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    interactionTimestamp = System.currentTimeMillis()
+                                    onItemSelected(item)
+                                }
+                                .padding(horizontal = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formatItem(item),
+                                color = if (isSelected) Color(0xFFFF4D6D) else Color(0xFFE4E4E7),
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .clip(shape)
+                                        .background(Color(0xFFE11D48))
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

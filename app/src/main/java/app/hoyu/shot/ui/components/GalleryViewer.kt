@@ -16,7 +16,6 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -30,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -52,6 +52,7 @@ import java.util.*
 fun GalleryViewer(
     photos: List<CapturedPhotoInfo>,
     initialIndex: Int = 0,
+    rotationDegrees: Float = 0f,
     onDismiss: () -> Unit,
     onDeletePhoto: (CapturedPhotoInfo) -> Unit,
     modifier: Modifier = Modifier
@@ -76,7 +77,7 @@ fun GalleryViewer(
             .fillMaxSize()
             .background(Color(0xFF000000))
     ) {
-        // Horizontal Pager for smooth swipe left/right browsing
+        // Horizontal Pager for smooth swipe left/right photo browsing
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
@@ -93,7 +94,7 @@ fun GalleryViewer(
             )
         }
 
-        // Top ProShot-style EXIF Bar
+        // Top ProShot-style EXIF Bar (Adaptive to phone rotation)
         AnimatedVisibility(
             visible = isUiChromeVisible,
             enter = fadeIn(),
@@ -105,7 +106,7 @@ fun GalleryViewer(
                     .fillMaxWidth()
                     .background(Color(0xD909090B)) // shadcn zinc-950 translucent
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 // Top Row: Back button and EXIF Specs
                 Row(
@@ -115,13 +116,15 @@ fun GalleryViewer(
                 ) {
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back to Camera",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier
+                                .size(20.dp)
+                                .rotate(rotationDegrees)
                         )
                     }
 
@@ -137,8 +140,9 @@ fun GalleryViewer(
                     } else "3.8 MB"
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.rotate(rotationDegrees)
                     ) {
                         ExifSpecItem(mp)
                         ExifSpecItem(res)
@@ -157,7 +161,9 @@ fun GalleryViewer(
                     color = Color(0xFF71717A),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 40.dp, top = 2.dp)
+                    modifier = Modifier
+                        .padding(start = 42.dp, top = 2.dp)
+                        .rotate(rotationDegrees)
                 )
             }
         }
@@ -174,7 +180,7 @@ fun GalleryViewer(
                     .fillMaxWidth()
                     .background(Color(0xD909090B))
                     .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -188,27 +194,28 @@ fun GalleryViewer(
                         .clip(shape)
                         .background(Color(0x33FFFFFF))
                         .border(1.dp, Color(0xFF27272A), shape)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = name,
                         color = Color(0xFFFAFAFA),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.rotate(rotationDegrees)
                     )
                 }
 
                 // Bottom-Right: Share & Delete buttons (Clean shadcn style)
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Share Button
                     IconButton(
                         onClick = { sharePhoto(context, currentPhoto.uriString) },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .clip(shape)
                             .background(Color(0x33FFFFFF))
                             .border(1.dp, Color(0xFF27272A), shape)
@@ -217,7 +224,9 @@ fun GalleryViewer(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Share",
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier
+                                .size(18.dp)
+                                .rotate(rotationDegrees)
                         )
                     }
 
@@ -225,7 +234,7 @@ fun GalleryViewer(
                     IconButton(
                         onClick = { onDeletePhoto(currentPhoto) },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .clip(shape)
                             .background(Color(0x33E11D48))
                             .border(1.dp, Color(0xFFE11D48), shape)
@@ -234,7 +243,9 @@ fun GalleryViewer(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete",
                             tint = Color(0xFFFF4D6D),
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier
+                                .size(18.dp)
+                                .rotate(rotationDegrees)
                         )
                     }
                 }
@@ -299,7 +310,7 @@ private fun ZoomablePhotoItem(
                     } else {
                         offset = Offset.Zero
                         // If dragging right while not zoomed in at edge, return to camera
-                        if (pan.x > 30f) {
+                        if (pan.x > 35f) {
                             onSwipeRightAtEdge()
                         }
                     }

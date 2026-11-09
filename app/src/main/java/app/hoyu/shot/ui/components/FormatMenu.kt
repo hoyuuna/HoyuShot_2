@@ -10,7 +10,9 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -43,7 +45,6 @@ fun FormatMenu(
     val view = LocalView.current
     val shape = RoundedCornerShape(2.dp)
 
-    // 5-second inactivity auto-close timer
     var interactionEpoch by remember { mutableStateOf(0L) }
     LaunchedEffect(interactionEpoch, visible) {
         if (visible) {
@@ -56,48 +57,53 @@ fun FormatMenu(
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.92f),
-        exit = fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.92f),
-        modifier = modifier
+        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
+        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
+        modifier = modifier.padding(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .rotate(rotationDegrees)
-                .clip(shape)
-                .background(Color(0xF209090B)) // shadcn zinc-950 semi-translucent
-                .border(1.dp, Color(0xFF27272A), shape)
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Box(
+            modifier = Modifier.rotate(rotationDegrees),
+            contentAlignment = Alignment.Center
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .clip(shape)
+                    .background(Color(0xF509090B)) // shadcn zinc-950
+                    .border(1.dp, Color(0xFF27272A), shape)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "RES // FORMAT",
-                    color = Color(0xFFFAFAFA),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "[X]",
-                    color = Color(0xFFA1A1AA),
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .clickable { onDismiss() }
-                        .padding(2.dp)
-                )
-            }
-
-            // Row 1: Real Megapixels from hardware sensor
-            if (resolutions.isNotEmpty()) {
+                // Header
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "RES // FORMAT",
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "[ESC]",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .clickable { onDismiss() }
+                            .padding(2.dp)
+                    )
+                }
+
+                // Row 1: Hardware Resolutions in a Horizontal Row (ProShot Image 8)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -105,8 +111,9 @@ fun FormatMenu(
                         val isSelected = selectedResolution?.width == res.width && selectedResolution.height == res.height
                         Box(
                             modifier = Modifier
+                                .height(34.dp)
                                 .clip(shape)
-                                .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x33000000))
+                                .background(if (isSelected) Color(0xFFFAFAFA) else Color(0xFF18181B))
                                 .border(
                                     1.dp,
                                     if (isSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
@@ -117,52 +124,56 @@ fun FormatMenu(
                                     interactionEpoch = System.currentTimeMillis()
                                     onResolutionSelected(res)
                                 }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = res.mpLabel,
                                 color = if (isSelected) Color.Black else Color(0xFFFAFAFA),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                     }
                 }
-            }
 
-            // Row 2: Format Selection (JPEG, RAW, RAW+JPEG)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                formatOptions.forEach { fmt ->
-                    val isSelected = fmt == currentFormat
-                    Box(
-                        modifier = Modifier
-                            .clip(shape)
-                            .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x33000000))
-                        .border(
-                            1.dp,
-                            if (isSelected) Color(0xFFFAFAFA) else Color(0xFF27272A),
-                            shape
-                        )
-                        .clickable {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            interactionEpoch = System.currentTimeMillis()
-                            onFormatSelected(fmt)
+                // Row 2: Formats in a Horizontal Row (ProShot Image 8: JPEG, RAW, RAW+JPEG)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    formatOptions.forEach { fmt ->
+                        val isSelected = currentFormat == fmt
+                        Box(
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(shape)
+                                .background(if (isSelected) Color(0xFFE11D48) else Color(0xFF18181B))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                    shape
+                                )
+                                .clickable {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    interactionEpoch = System.currentTimeMillis()
+                                    onFormatSelected(fmt)
+                                }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = fmt.label,
+                                color = if (isSelected) Color.White else Color(0xFFFAFAFA),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
                         }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = fmt.label,
-                            color = if (isSelected) Color.Black else Color(0xFFFAFAFA),
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace
-                        )
                     }
                 }
             }

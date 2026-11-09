@@ -77,51 +77,151 @@ fun CameraScreen(
         surfaceViewRef?.setAspectRatio(camHeight, camWidth)
     }
 
-    Box(
+    val previewRatio = when (uiState.aspectRatio) {
+        AspectRatio.RATIO_4_3 -> 3f / 4f
+        AspectRatio.RATIO_16_9 -> 9f / 16f
+        AspectRatio.RATIO_1_1 -> 1f
+        else -> 3f / 4f
+    }
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF000000))
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // ==========================================
-            // 1. TOP TOOLBAR (Settings, AE, 4:3, Grid, MP & Format)
-            // ==========================================
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        // Dynamic Layout Calculation:
+        // In 4:3 or 1:1 ratios, black margins are large enough to hold top bar and bottom controls without obscuring preview.
+        // In 16:9 or Full, controls dynamically overlay the preview with translucent glass styling so buttons never get crushed.
+        val previewHeightEstimate = maxWidth / previewRatio
+        val leftoverHeight = maxHeight - previewHeightEstimate
+        val isOverlayNeeded = leftoverHeight < 210.dp
+
+        // ==========================================
+        // MAIN VIEWPORT STRUCTURE
+        // ==========================================
+        if (!isOverlayNeeded) {
+            // 4:3 / 1:1 Layout: Clean Column (TopBar -> Preview -> BottomControls in black margin)
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Left Quick Controls
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Top Bar in black letterbox
+                TopToolbar(
+                    uiState = uiState,
+                    animatedRotation = animatedRotation,
+                    shape = shape,
+                    onOpenSettings = { isSettingsDialogVisible = true },
+                    onToggleAeLock = { viewModel.toggleAeLock() },
+                    onChangeRatio = {
+                        val next = when (uiState.aspectRatio) {
+                            AspectRatio.RATIO_4_3 -> AspectRatio.RATIO_16_9
+                            AspectRatio.RATIO_16_9 -> AspectRatio.RATIO_1_1
+                            AspectRatio.RATIO_1_1 -> AspectRatio.RATIO_4_3
+                            else -> AspectRatio.RATIO_4_3
+                        }
+                        viewModel.setAspectRatio(next)
+                    },
+                    onToggleGrid = { viewModel.toggleGrid() },
+                    onToggleFormatMenu = {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        isFormatMenuVisible = !isFormatMenuVisible
+                    }
+                )
+
+                // Viewfinder Preview (Strict aspect ratio)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(previewRatio)
                 ) {
-                    // Settings Gear
-                    ShadcnIconButton(
-                        icon = Icons.Default.Settings,
-                        rotationDegrees = animatedRotation,
-                        onClick = { isSettingsDialogVisible = true }
+                    ViewfinderPreviewContent(
+                        uiState = uiState,
+                        animatedRotation = animatedRotation,
+                        shape = shape,
+                        isOverlayMode = false,
+                        onSurfaceReady = { surfaceViewRef = it },
+                        onSizeChanged = { previewContainerSize = it },
+                        onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                        onSwipeToGallery = { viewModel.openGallery() },
+                        onTouchFocus = { offset ->
+                            activeParamMenu = null
+                            isFormatMenuVisible = false
+                            viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                        },
+                        onSelectLens = { lens -> viewModel.selectLens(lens) },
+                        onResetEv = { viewModel.setEvCompensation(0) }
                     )
+                }
 
-                    // AE Lock
-                    ShadcnTextButton(
-                        text = if (uiState.isAeLocked) "AEL" else "AE",
-                        isActive = uiState.isAeLocked,
-                        rotationDegrees = animatedRotation,
-                        onClick = { viewModel.toggleAeLock() }
+                // Bottom Controls in black margin
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .navigationBarsPadding(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    BottomControlsContent(
+                        uiState = uiState,
+                        activeParamMenu = activeParamMenu,
+                        animatedRotation = animatedRotation,
+                        shape = shape,
+                        onParamClick = { param ->
+                            activeParamMenu = if (activeParamMenu == param) null else param
+                        },
+                        onOpenGallery = { viewModel.openGallery() },
+                        onOpenModeModal = { isModeModalVisible = true },
+                        onCapture = { viewModel.takePicture() },
+                        onToggleFlip = { viewModel.toggleCameraFacing() },
+                        onToggleFlash = { viewModel.toggleFlash() },
+                        onEvChanged = { viewModel.setEvCompensation(it) },
+                        onResetEv = { viewModel.setEvCompensation(0) }
                     )
+                }
+            }
+        } else {
+            // 16:9 / Full Layout: Preview fills background, Controls dynamically overlay with translucent styling
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Viewfinder Preview as primary layer
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(previewRatio)
+                        .align(Alignment.Center)
+                ) {
+                    ViewfinderPreviewContent(
+                        uiState = uiState,
+                        animatedRotation = animatedRotation,
+                        shape = shape,
+                        isOverlayMode = true,
+                        onSurfaceReady = { surfaceViewRef = it },
+                        onSizeChanged = { previewContainerSize = it },
+                        onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                        onSwipeToGallery = { viewModel.openGallery() },
+                        onTouchFocus = { offset ->
+                            activeParamMenu = null
+                            isFormatMenuVisible = false
+                            viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                        },
+                        onSelectLens = { lens -> viewModel.selectLens(lens) },
+                        onResetEv = { viewModel.setEvCompensation(0) }
+                    )
+                }
 
-                    // Aspect Ratio Selector
-                    ShadcnTextButton(
-                        text = uiState.aspectRatio.ratioName,
-                        isActive = false,
-                        rotationDegrees = animatedRotation,
-                        onClick = {
+                // Top Toolbar (Translucent Overlay)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .background(Color(0x55000000))
+                ) {
+                    TopToolbar(
+                        uiState = uiState,
+                        animatedRotation = animatedRotation,
+                        shape = shape,
+                        onOpenSettings = { isSettingsDialogVisible = true },
+                        onToggleAeLock = { viewModel.toggleAeLock() },
+                        onChangeRatio = {
                             val next = when (uiState.aspectRatio) {
                                 AspectRatio.RATIO_4_3 -> AspectRatio.RATIO_16_9
                                 AspectRatio.RATIO_16_9 -> AspectRatio.RATIO_1_1
@@ -129,393 +229,48 @@ fun CameraScreen(
                                 else -> AspectRatio.RATIO_4_3
                             }
                             viewModel.setAspectRatio(next)
-                        }
-                    )
-
-                    // Grid Mode Selector
-                    ShadcnIconButton(
-                        icon = Icons.Default.GridOn,
-                        isActive = uiState.gridMode != GridMode.NONE,
-                        rotationDegrees = animatedRotation,
-                        onClick = { viewModel.toggleGrid() }
-                    )
-                }
-
-                // Right: Megapixels & Format Pill (e.g. 12.5MP // JPEG)
-                val formatStr = uiState.captureFormat.label
-                Box(
-                    modifier = Modifier
-                        .clip(shape)
-                        .background(Color(0x33000000))
-                        .border(
-                            1.dp,
-                            if (uiState.captureRaw) Color(0xFFE11D48) else Color(0xFF27272A),
-                            shape
-                        )
-                        .clickable {
+                        },
+                        onToggleGrid = { viewModel.toggleGrid() },
+                        onToggleFormatMenu = {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             isFormatMenuVisible = !isFormatMenuVisible
                         }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = uiState.selectedMegapixels.replace(" ", ""),
-                            color = Color(0xFFFAFAFA),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "//",
-                            color = Color(0xFF71717A),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = formatStr,
-                            color = if (uiState.captureRaw) Color(0xFFFF4D6D) else Color(0xFFA1A1AA),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            // ==========================================
-            // 2. VIEWFINDER PREVIEW (Strict aspect ratio, internal histogram, dual-axis level, lens selector)
-            // ==========================================
-            val previewRatio = when (uiState.aspectRatio) {
-                AspectRatio.RATIO_4_3 -> 3f / 4f
-                AspectRatio.RATIO_16_9 -> 9f / 16f
-                AspectRatio.RATIO_1_1 -> 1f
-                else -> 3f / 4f
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(previewRatio)
-                    .clipToBounds()
-                    .onSizeChanged { previewContainerSize = it }
-                    .pointerInput(uiState.currentZoomRatio) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            if (zoom != 1.0f) {
-                                viewModel.setZoomRatio(uiState.currentZoomRatio * zoom)
-                            }
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        // Swipe right to quickly open recent photo gallery!
-                        var horizontalSwipeAccumulator = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { horizontalSwipeAccumulator = 0f },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                horizontalSwipeAccumulator += dragAmount
-                                if (horizontalSwipeAccumulator > 50f) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    horizontalSwipeAccumulator = 0f
-                                    viewModel.openGallery()
-                                }
-                            }
-                        )
-                    }
-                    .pointerInput(Unit) {
-                        // Tap to focus (tapping on existing focus cancels it!)
-                        detectTapGestures { offset ->
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            activeParamMenu = null
-                            isFormatMenuVisible = false
-                            viewModel.onTouchFocus(
-                                offset,
-                                previewContainerSize.width,
-                                previewContainerSize.height
-                            )
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                // Camera2 Hardware Surface
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        AutoFitSurfaceView(context).apply {
-                            surfaceViewRef = this
-                            holder.addCallback(object : SurfaceHolder.Callback {
-                                override fun surfaceCreated(holder: SurfaceHolder) {
-                                    viewModel.startCamera(holder.surface)
-                                }
-                                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-                                override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                    viewModel.stopCamera()
-                                }
-                            })
-                        }
-                    },
-                    update = { v ->
-                        val (camWidth, camHeight) = uiState.previewSize
-                        v.setAspectRatio(camHeight, camWidth)
-                    }
-                )
-
-                // Composition Grid Overlay (strictly inside the preview container)
-                GridOverlay(gridMode = uiState.gridMode)
-
-                // Focus Peaking & Zebra Stripes Overlay
-                PeakingAndZebraOverlay(
-                    isPeakingEnabled = uiState.isFocusPeakingEnabled,
-                    isZebraEnabled = uiState.isZebraStripesEnabled,
-                    histogram = uiState.histogram
-                )
-
-                // Large Dual-Axis Horizon Level (Eye-level pitch & rotation-adaptive roll)
-                if (uiState.isHorizonLevelVisible) {
-                    HorizonLevelIndicator(
-                        orientation = uiState.horizon,
-                        modifier = Modifier.fillMaxSize()
                     )
                 }
 
-                // Tap-to-Focus Reticle
-                FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
-
-                // Live Histogram View: Always in Top-Left Corner inside preview, rotating with screen!
+                // Bottom Controls (Translucent Glass Overlay)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .rotate(animatedRotation)
-                        .clip(shape)
-                        .background(Color(0x77000000))
-                        .border(1.dp, Color(0x33FFFFFF), shape)
-                        .padding(4.dp)
-                ) {
-                    HistogramView(histogram = uiState.histogram)
-                }
-
-                // Bottom Inside Preview: EV Position Alert Badge & Lens Switcher
-                Column(
-                    modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .fillMaxWidth()
+                        .background(Color(0x55000000))
+                        .navigationBarsPadding()
                 ) {
-                    // EV Alert Badge (Resets EV to 0 on click!)
-                    EvPositionAlertBadge(
-                        evIndex = uiState.evCompensationIndex,
-                        rotationDegrees = animatedRotation,
+                    BottomControlsContent(
+                        uiState = uiState,
+                        activeParamMenu = activeParamMenu,
+                        animatedRotation = animatedRotation,
+                        shape = shape,
+                        onParamClick = { param ->
+                            activeParamMenu = if (activeParamMenu == param) null else param
+                        },
+                        onOpenGallery = { viewModel.openGallery() },
+                        onOpenModeModal = { isModeModalVisible = true },
+                        onCapture = { viewModel.takePicture() },
+                        onToggleFlip = { viewModel.toggleCameraFacing() },
+                        onToggleFlash = { viewModel.toggleFlash() },
+                        onEvChanged = { viewModel.setEvCompensation(it) },
                         onResetEv = { viewModel.setEvCompensation(0) }
                     )
-
-                    // Lens Switcher (e.g. 0.6x, 1x, 3.2x inside preview bottom)
-                    if (uiState.availableLenses.size > 1) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
-                                val isSelected = uiState.currentLens?.id == lens.id
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(shape)
-                                        .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) Color(0xFFFAFAFA) else Color(0x66FFFFFF),
-                                            shape
-                                        )
-                                        .clickable {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                            viewModel.selectLens(lens)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = lens.label,
-                                        color = if (isSelected) Color.Black else Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.rotate(animatedRotation)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // 3. BOTTOM CONTROL REGION (Black, uncluttered, EV slider next to shutter)
-            // ==========================================
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color(0xFF000000))
-                    .navigationBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Row 1: Horizontal Parameter Strip (AF, SEC, ISO, WB)
-                HorizontalParameterStrip(
-                    uiState = uiState,
-                    activeParam = activeParamMenu,
-                    rotationDegrees = animatedRotation,
-                    onParamClick = { param ->
-                        activeParamMenu = if (activeParamMenu == param) null else param
-                    }
-                )
-
-                // Row 2: Bottom Action Bar (Thumbnail, Mode [A], Shutter Button, Horizontal EV Slider, Flip/Flash)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left: Quick Thumbnail Gallery Trigger
-                    QuickThumbnail(
-                        photoInfo = uiState.lastCapturedPhoto,
-                        onClick = { viewModel.openGallery() }
-                    )
-
-                    // Center-Left: Mode Selector Trigger [A], [P], [S], [ISO], [M]
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(shape)
-                            .background(Color(0x33000000))
-                            .border(1.dp, Color(0xFFFAFAFA), shape)
-                            .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                isModeModalVisible = true
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = uiState.exposureMode.label,
-                            color = Color(0xFFFAFAFA),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.rotate(animatedRotation)
-                        )
-                    }
-
-                    // Center: Shutter Button (White circle with prominent Nothing Red outer border)
-                    Box(
-                        modifier = Modifier
-                            .size(76.dp)
-                            .border(3.dp, Color(0xFFE11D48), CircleShape)
-                            .padding(5.dp)
-                            .background(
-                                if (uiState.isCapturing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
-                                CircleShape
-                            )
-                            .clickable(enabled = !uiState.isCapturing) {
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                viewModel.takePicture()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (uiState.isCapturing) {
-                            CircularProgressIndicator(
-                                color = Color(0xFFE11D48),
-                                strokeWidth = 3.dp,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        } else {
-                            // Center Nothing Red dot
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(Color(0xFFE11D48), CircleShape)
-                            )
-                        }
-                    }
-
-                    // Center-Right: Horizontal EV Slider near the shutter button
-                    HorizontalEvSlider(
-                        evIndex = uiState.evCompensationIndex,
-                        onEvChanged = { viewModel.setEvCompensation(it) }
-                    )
-
-                    // Right: Flip Camera & Flash Buttons
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // Flip Camera
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(shape)
-                                .background(Color(0x33000000))
-                                .border(1.dp, Color(0xFF27272A), shape)
-                                .clickable {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    viewModel.toggleCameraFacing()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Cameraswitch,
-                                contentDescription = "Flip Camera",
-                                tint = Color.White,
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .rotate(animatedRotation)
-                        )
-                        }
-
-                        // Flash Toggle
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(shape)
-                                .background(if (uiState.flashMode != FlashMode.OFF) Color(0xFF27272A) else Color(0x33000000))
-                                .border(1.dp, if (uiState.flashMode != FlashMode.OFF) Color(0xFFFAFAFA) else Color(0xFF27272A), shape)
-                                .clickable {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    viewModel.toggleFlash()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = when (uiState.flashMode) {
-                                    FlashMode.OFF -> Icons.Default.FlashOff
-                                    FlashMode.AUTO -> Icons.Default.FlashAuto
-                                    FlashMode.ON -> Icons.Default.FlashOn
-                                    FlashMode.TORCH -> Icons.Default.Highlight
-                                },
-                                contentDescription = "Flash",
-                                tint = if (uiState.flashMode != FlashMode.OFF) Color(0xFFFAFAFA) else Color(0xFF71717A),
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .rotate(animatedRotation)
-                            )
-                        }
-                    }
                 }
             }
         }
 
         // ==========================================
-        // 4. TEMPORARY OVERLAYS & POPUPS (Animated entrance, rotating with screen, no overlapping)
+        // TEMPORARY OVERLAYS & POPUPS (Click outside to dismiss)
         // ==========================================
 
-        // Outside Tap Scrim Interceptor (Closes popups without triggering tap-to-focus!)
+        // Outside Tap Scrim Interceptor (Closes active dialog without focusing camera!)
         if (activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible) {
             Box(
                 modifier = Modifier
@@ -532,7 +287,7 @@ fun CameraScreen(
             )
         }
 
-        // Format & Megapixel Selector Popover (Real hardware MP options, rotating with screen)
+        // Format & Megapixel Selector Popover (ProShot Image 8 style)
         FormatMenu(
             visible = isFormatMenuVisible,
             resolutions = uiState.availableResolutions,
@@ -548,12 +303,12 @@ fun CameraScreen(
                 .padding(top = 50.dp, end = 12.dp)
         )
 
-        // Parameter 2-Column Grid Menu (Animated, rotating with screen, centered above the parameter strip)
+        // Parameter Menu Popover (AF, SEC, ISO, WB)
         activeParamMenu?.let { param ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 120.dp),
+                    .padding(bottom = 175.dp),
                 contentAlignment = Alignment.BottomCenter
             ) {
                 when (param) {
@@ -574,9 +329,7 @@ fun CameraScreen(
                                 viewModel.setShutterSpeedNanos(nanos)
                             },
                             formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
-                            onAutoSelected = {
-                                viewModel.setExposureMode(ExposureMode.AUTO)
-                            },
+                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
                             isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
                             onDismiss = { activeParamMenu = null }
                         )
@@ -594,9 +347,7 @@ fun CameraScreen(
                                 viewModel.setIso(iso)
                             },
                             formatItem = { "$it" },
-                            onAutoSelected = {
-                                viewModel.setExposureMode(ExposureMode.AUTO)
-                            },
+                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
                             isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
                             onDismiss = { activeParamMenu = null }
                         )
@@ -609,13 +360,9 @@ fun CameraScreen(
                             items = focusDiopters,
                             selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters else null,
                             rotationDegrees = animatedRotation,
-                            onItemSelected = { diopter ->
-                                viewModel.setFocusDistance(diopter)
-                            },
+                            onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
                             formatItem = { if (it == 0f) "∞ MACRO" else String.format("%.1fD", it) },
-                            onAutoSelected = {
-                                viewModel.toggleAutoFocus()
-                            },
+                            onAutoSelected = { viewModel.toggleAutoFocus() },
                             isAutoSelected = !uiState.isManualFocusEnabled,
                             onDismiss = { activeParamMenu = null }
                         )
@@ -628,13 +375,9 @@ fun CameraScreen(
                             items = kelvinValues,
                             selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
                             rotationDegrees = animatedRotation,
-                            onItemSelected = { k ->
-                                viewModel.setKelvin(k)
-                            },
+                            onItemSelected = { k -> viewModel.setKelvin(k) },
                             formatItem = { "${it}K" },
-                            onAutoSelected = {
-                                viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO)
-                            },
+                            onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
                             isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
                             onDismiss = { activeParamMenu = null }
                         )
@@ -644,7 +387,7 @@ fun CameraScreen(
             }
         }
 
-        // Mode Dial Selector Modal (Instant click, animated, rotating)
+        // Mode Dial Selector Modal
         ModeDialSelectorModal(
             visible = isModeModalVisible,
             currentMode = uiState.exposureMode,
@@ -654,7 +397,7 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // Settings Dialog (Animated, rotating with screen)
+        // Settings Dialog
         SettingsDialog(
             visible = isSettingsDialogVisible,
             uiState = uiState,
@@ -670,7 +413,7 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // ProShot-style Gallery Viewer (Smooth sliding animation, zoom, EXIF)
+        // ProShot-style Gallery Viewer
         AnimatedVisibility(
             visible = uiState.isGalleryVisible && uiState.recentPhotos.isNotEmpty(),
             enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
@@ -678,10 +421,451 @@ fun CameraScreen(
         ) {
             GalleryViewer(
                 photos = uiState.recentPhotos,
+                rotationDegrees = animatedRotation,
                 onDismiss = { viewModel.closeGallery() },
                 onDeletePhoto = { photo -> viewModel.deletePhoto(photo) }
             )
         }
+    }
+}
+
+// ==========================================
+// TOP TOOLBAR COMPOSABLE
+// ==========================================
+@Composable
+private fun TopToolbar(
+    uiState: CameraUiState,
+    animatedRotation: Float,
+    shape: RoundedCornerShape,
+    onOpenSettings: () -> Unit,
+    onToggleAeLock: () -> Unit,
+    onChangeRatio: () -> Unit,
+    onToggleGrid: () -> Unit,
+    onToggleFormatMenu: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left Quick Controls
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Settings Gear
+            ShadcnIconButton(
+                icon = Icons.Default.Settings,
+                rotationDegrees = animatedRotation,
+                onClick = onOpenSettings
+            )
+
+            // AE Lock
+            ShadcnTextButton(
+                text = if (uiState.isAeLocked) "AEL" else "AE",
+                isActive = uiState.isAeLocked,
+                rotationDegrees = animatedRotation,
+                onClick = onToggleAeLock
+            )
+
+            // Aspect Ratio Selector
+            ShadcnTextButton(
+                text = uiState.aspectRatio.ratioName,
+                isActive = false,
+                rotationDegrees = animatedRotation,
+                onClick = onChangeRatio
+            )
+
+            // Grid Mode Selector
+            ShadcnIconButton(
+                icon = Icons.Default.GridOn,
+                isActive = uiState.gridMode != GridMode.NONE,
+                rotationDegrees = animatedRotation,
+                onClick = onToggleGrid
+            )
+        }
+
+        // Right: Megapixels & Format Pill (e.g. 12.5MP // JPEG)
+        val formatStr = uiState.captureFormat.label
+        Box(
+            modifier = Modifier
+                .clip(shape)
+                .background(Color(0x33000000))
+                .border(
+                    1.dp,
+                    if (uiState.captureRaw) Color(0xFFE11D48) else Color(0xFF27272A),
+                    shape
+                )
+                .clickable { onToggleFormatMenu() }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = uiState.selectedMegapixels.replace(" ", ""),
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "//",
+                    color = Color(0xFF71717A),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = formatStr,
+                    color = if (uiState.captureRaw) Color(0xFFFF4D6D) else Color(0xFFA1A1AA),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+// ==========================================
+// VIEWFINDER PREVIEW CONTENT
+// ==========================================
+@Composable
+private fun ViewfinderPreviewContent(
+    uiState: CameraUiState,
+    animatedRotation: Float,
+    shape: RoundedCornerShape,
+    isOverlayMode: Boolean,
+    onSurfaceReady: (AutoFitSurfaceView) -> Unit,
+    onSizeChanged: (IntSize) -> Unit,
+    onZoomChanged: (Float) -> Unit,
+    onSwipeToGallery: () -> Unit,
+    onTouchFocus: (androidx.compose.ui.geometry.Offset) -> Unit,
+    onSelectLens: (CameraLensInfo) -> Unit,
+    onResetEv: () -> Unit
+) {
+    val view = LocalView.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .onSizeChanged { onSizeChanged(it) }
+            .pointerInput(uiState.currentZoomRatio) {
+                detectTransformGestures { _, _, zoom, _ ->
+                    if (zoom != 1.0f) {
+                        onZoomChanged(zoom)
+                    }
+                }
+            }
+            .pointerInput(Unit) {
+                var swipeAccumulator = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { swipeAccumulator = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        swipeAccumulator += dragAmount
+                        if (swipeAccumulator > 50f) {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            swipeAccumulator = 0f
+                            onSwipeToGallery()
+                        }
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onTouchFocus(offset)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Hardware Camera2 Surface
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                AutoFitSurfaceView(context).apply {
+                    onSurfaceReady(this)
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            // Camera start handled in viewModel
+                        }
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {}
+                    })
+                }
+            },
+            update = { v ->
+                val (camWidth, camHeight) = uiState.previewSize
+                v.setAspectRatio(camHeight, camWidth)
+            }
+        )
+
+        // Composition Grid Overlay
+        GridOverlay(gridMode = uiState.gridMode)
+
+        // Focus Peaking & Zebra Stripes Overlay
+        PeakingAndZebraOverlay(
+            isPeakingEnabled = uiState.isFocusPeakingEnabled,
+            isZebraEnabled = uiState.isZebraStripesEnabled,
+            histogram = uiState.histogram
+        )
+
+        // Large Dual-Axis Horizon Level (Passes animatedRotation so it aligns with phone orientation!)
+        if (uiState.isHorizonLevelVisible) {
+            HorizonLevelIndicator(
+                orientation = uiState.horizon,
+                rotationDegrees = animatedRotation,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Tap-to-Focus Reticle
+        FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
+
+        // Live Histogram: Only shown if enabled in settings, safe padding preventing overlay
+        if (uiState.isHistogramVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(
+                        top = if (isOverlayMode) 64.dp else 12.dp,
+                        start = 12.dp
+                    )
+                    .rotate(animatedRotation)
+                    .clip(shape)
+                    .background(Color(0x77000000))
+                    .border(1.dp, Color(0x33FFFFFF), shape)
+                    .padding(4.dp)
+            ) {
+                HistogramView(histogram = uiState.histogram)
+            }
+        }
+
+        // Bottom Inside Preview: EV Position Alert Badge & Lens Switcher
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // EV Alert Badge (Resets EV to 0 on click!)
+            EvPositionAlertBadge(
+                evIndex = uiState.evCompensationIndex,
+                rotationDegrees = animatedRotation,
+                onResetEv = onResetEv
+            )
+
+            // Lens Switcher: Horizontal pill row (0.6x, 1x, 3.2x)
+            if (uiState.availableLenses.size > 1) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
+                        val isSelected = uiState.currentLens?.id == lens.id
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(shape)
+                                .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFFFAFAFA) else Color(0x66FFFFFF),
+                                    shape
+                                )
+                                .clickable {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    onSelectLens(lens)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = lens.label,
+                                color = if (isSelected) Color.Black else Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.rotate(animatedRotation)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// BOTTOM CONTROLS CONTENT
+// ==========================================
+@Composable
+private fun BottomControlsContent(
+    uiState: CameraUiState,
+    activeParamMenu: DialParameter?,
+    animatedRotation: Float,
+    shape: RoundedCornerShape,
+    onParamClick: (DialParameter) -> Unit,
+    onOpenGallery: () -> Unit,
+    onOpenModeModal: () -> Unit,
+    onCapture: () -> Unit,
+    onToggleFlip: () -> Unit,
+    onToggleFlash: () -> Unit,
+    onEvChanged: (Int) -> Unit,
+    onResetEv: () -> Unit
+) {
+    val view = LocalView.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Row 1: Horizontal Parameter Strip (AF, SEC, ISO, WB)
+        HorizontalParameterStrip(
+            uiState = uiState,
+            activeParam = activeParamMenu,
+            rotationDegrees = animatedRotation,
+            onParamClick = onParamClick
+        )
+
+        // Row 2: Bottom Action Bar (Thumbnail, Mode [A], Shutter, Flip Camera, Flash)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Quick Gallery Thumbnail
+            QuickThumbnail(
+                photoInfo = uiState.lastCapturedPhoto,
+                onClick = onOpenGallery
+            )
+
+            // Mode Selector Button [A]
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(shape)
+                    .background(Color(0x33000000))
+                    .border(1.dp, Color(0xFFFAFAFA), shape)
+                    .clickable {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onOpenModeModal()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = uiState.exposureMode.label,
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.rotate(animatedRotation)
+                )
+            }
+
+            // Shutter Button (White circle, thick Nothing Red border #E11D48, center red dot)
+            Box(
+                modifier = Modifier
+                    .size(74.dp)
+                    .border(3.dp, Color(0xFFE11D48), CircleShape)
+                    .padding(5.dp)
+                    .background(
+                        if (uiState.isCapturing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
+                        CircleShape
+                    )
+                    .clickable(enabled = !uiState.isCapturing) {
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        onCapture()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (uiState.isCapturing) {
+                    CircularProgressIndicator(
+                        color = Color(0xFFE11D48),
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(28.dp)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(Color(0xFFE11D48), CircleShape)
+                    )
+                }
+            }
+
+            // Flip Camera Button
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(shape)
+                    .background(Color(0x33000000))
+                    .border(1.dp, Color(0xFF27272A), shape)
+                    .clickable {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onToggleFlip()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Cameraswitch,
+                    contentDescription = "Flip Camera",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(17.dp)
+                        .rotate(animatedRotation)
+                )
+            }
+
+            // Flash Button
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(shape)
+                    .background(if (uiState.flashMode != FlashMode.OFF) Color(0xFF27272A) else Color(0x33000000))
+                    .border(1.dp, if (uiState.flashMode != FlashMode.OFF) Color(0xFFFAFAFA) else Color(0xFF27272A), shape)
+                    .clickable {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onToggleFlash()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = when (uiState.flashMode) {
+                        FlashMode.OFF -> Icons.Default.FlashOff
+                        FlashMode.AUTO -> Icons.Default.FlashAuto
+                        FlashMode.ON -> Icons.Default.FlashOn
+                        FlashMode.TORCH -> Icons.Default.Highlight
+                    },
+                    contentDescription = "Flash",
+                    tint = if (uiState.flashMode != FlashMode.OFF) Color(0xFFFAFAFA) else Color(0xFF71717A),
+                    modifier = Modifier
+                        .size(17.dp)
+                        .rotate(animatedRotation)
+                )
+            }
+        }
+
+        // Row 3: Dedicated Bottom EV Bar - ON ITS OWN ROW AT THE VERY BOTTOM (Near charging port)
+        // Spans the full width of the control region, matching lens switcher width!
+        DedicatedBottomEvBar(
+            evIndex = uiState.evCompensationIndex,
+            minEv = uiState.capabilities?.evRange?.lower ?: -6,
+            maxEv = uiState.capabilities?.evRange?.upper ?: 6,
+            rotationDegrees = animatedRotation,
+            onEvChanged = onEvChanged,
+            onResetEv = onResetEv
+        )
     }
 }
 

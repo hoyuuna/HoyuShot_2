@@ -54,4 +54,28 @@ class SettingsRepository(context: Context) {
     var savedRawEnabled: Boolean
         get() = prefs.getBoolean("saved_raw_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_raw_enabled", value).apply()
+
+    var savedGridMode: String
+        get() = prefs.getString("saved_grid_mode", "NONE") ?: "NONE"
+        set(value) = prefs.edit().putString("saved_grid_mode", value).apply()
+
+    var savedAspectRatio: String
+        get() = prefs.getString("saved_aspect_ratio", "RATIO_4_3") ?: "RATIO_4_3"
+        set(value) = prefs.edit().putString("saved_aspect_ratio", value).apply()
+
+    var savedHistogramVisible: Boolean
+        get() = prefs.getBoolean("saved_histogram_visible", false)
+        set(value) = prefs.edit().putBoolean("saved_histogram_visible", value).apply()
+
+    var savedHorizonVisible: Boolean
+        get() = prefs.getBoolean("saved_horizon_visible", true)
+        set(value) = prefs.edit().putBoolean("saved_horizon_visible", value).apply()
+
+    var savedPeakingEnabled: Boolean
+        get() = prefs.getBoolean("saved_peaking_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_peaking_enabled", value).apply()
+
+    var savedZebraEnabled: Boolean
+        get() = prefs.getBoolean("saved_zebra_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_zebra_enabled", value).apply()
 }

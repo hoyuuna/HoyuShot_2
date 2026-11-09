@@ -24,54 +24,69 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun HorizontalEvSlider(
+fun DedicatedBottomEvBar(
     evIndex: Int,
     minEv: Int = -6,
     maxEv: Int = 6,
+    rotationDegrees: Float = 0f,
     onEvChanged: (Int) -> Unit,
+    onResetEv: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val shape = RoundedCornerShape(2.dp)
     val totalSteps = (maxEv - minEv).coerceAtLeast(1)
 
+    // A prominent, solid bar at the bottom with the height of a camera lens button (~36dp)
     Row(
         modifier = modifier
-            .width(136.dp)
+            .fillMaxWidth()
             .height(38.dp)
-            .padding(horizontal = 4.dp),
+            .clip(shape)
+            .background(Color(0xFF18181B)) // solid zinc-900 block
+            .border(1.dp, if (evIndex != 0) Color(0xFFE11D48) else Color(0xFF27272A), shape)
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // Minus Button
         Text(
             text = "−",
-            color = Color(0xCCFFFFFF),
-            fontSize = 15.sp,
+            color = Color(0xFFFAFAFA),
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(end = 4.dp)
+            modifier = Modifier
+                .clickable {
+                    if (evIndex > minEv) {
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        onEvChanged(evIndex - 1)
+                    }
+                }
+                .padding(horizontal = 4.dp)
         )
 
-        // Horizontal Slider Track with wide touch area
+        // Thick, prominent Draggable Ruler Track
         Box(
             modifier = Modifier
                 .weight(1f)
-                .height(36.dp)
+                .fillMaxHeight()
                 .pointerInput(minEv, maxEv, evIndex) {
-                    var accumulatedDrag = 0f
+                    var accumulated = 0f
                     detectHorizontalDragGestures(
-                        onDragStart = { accumulatedDrag = 0f },
+                        onDragStart = { accumulated = 0f },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
-                            accumulatedDrag += dragAmount
+                            accumulated += dragAmount
                             val width = size.width
                             val stepPx = width / totalSteps.toFloat()
-                            val deltaSteps = (accumulatedDrag / stepPx).toInt()
+                            val deltaSteps = (accumulated / stepPx).toInt()
                             if (deltaSteps != 0) {
-                                val newEv = (evIndex + deltaSteps).coerceIn(minEv, maxEv)
-                                if (newEv != evIndex) {
+                                val next = (evIndex + deltaSteps).coerceIn(minEv, maxEv)
+                                if (next != evIndex) {
                                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                    onEvChanged(newEv)
-                                    accumulatedDrag = 0f
+                                    onEvChanged(next)
+                                    accumulated = 0f
                                 }
                             }
                         }
@@ -80,94 +95,82 @@ fun HorizontalEvSlider(
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val centerY = size.height / 2f
                 val width = size.width
+                val centerY = size.height / 2f
 
-                // Horizontal track line
+                // Base ruler guide
                 drawLine(
-                    color = Color(0x44FFFFFF),
-                    start = Offset(6f, centerY),
-                    end = Offset(width - 6f, centerY),
-                    strokeWidth = 3f
+                    color = Color(0xFF27272A),
+                    start = Offset(4f, centerY),
+                    end = Offset(width - 4f, centerY),
+                    strokeWidth = 4f
                 )
 
-                // Center zero tick
-                val zeroFraction = (0 - minEv).toFloat() / totalSteps.toFloat()
-                val zeroX = zeroFraction * width
-                drawLine(
-                    color = Color(0x99FFFFFF),
-                    start = Offset(zeroX, centerY - 6f),
-                    end = Offset(zeroX, centerY + 6f),
-                    strokeWidth = 2.5f
-                )
+                // Tick marks along the track
+                for (i in minEv..maxEv) {
+                    val f = (i - minEv).toFloat() / totalSteps.toFloat()
+                    val x = 4f + f * (width - 8f)
+                    val isZero = i == 0
+                    val tickHeight = if (isZero) 14f else 8f
+                    drawLine(
+                        color = if (isZero) Color(0xFFE11D48) else Color(0xFF52525B),
+                        start = Offset(x, centerY - tickHeight / 2f),
+                        end = Offset(x, centerY + tickHeight / 2f),
+                        strokeWidth = if (isZero) 2.5f else 1.5f
+                    )
+                }
 
-                // Current EV Thumb position
+                // Current EV Thumb (Solid thick rectangular pill)
                 val fraction = (evIndex - minEv).toFloat() / totalSteps.toFloat()
-                val thumbX = fraction * width
+                val thumbX = 4f + fraction * (width - 8f)
+                val thumbW = 22f
+                val thumbH = 20f
 
-                // Draw prominent thumb pill
                 drawRoundRect(
                     color = if (evIndex != 0) Color(0xFFE11D48) else Color(0xFFFAFAFA),
-                    topLeft = Offset(thumbX - 14f, centerY - 5f),
-                    size = androidx.compose.ui.geometry.Size(28f, 10f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f, 3f)
+                    topLeft = Offset(thumbX - thumbW / 2f, centerY - thumbH / 2f),
+                    size = androidx.compose.ui.geometry.Size(thumbW, thumbH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f)
                 )
             }
         }
 
+        // Plus Button
         Text(
             text = "+",
-            color = Color(0xCCFFFFFF),
-            fontSize = 15.sp,
+            color = Color(0xFFFAFAFA),
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(start = 4.dp)
+            modifier = Modifier
+                .clickable {
+                    if (evIndex < maxEv) {
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        onEvChanged(evIndex + 1)
+                    }
+                }
+                .padding(horizontal = 4.dp)
         )
-    }
-}
 
-@Composable
-fun EvPositionAlertBadge(
-    evIndex: Int,
-    rotationDegrees: Float = 0f,
-    onResetEv: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    if (evIndex == 0) return
-
-    val view = LocalView.current
-    val shape = RoundedCornerShape(2.dp)
-    val sign = if (evIndex > 0) "+$evIndex" else "$evIndex"
-
-    Box(
-        modifier = modifier
-            .rotate(rotationDegrees)
-            .clip(shape)
-            .background(Color(0xD909090B)) // Translucent Nothing Dark
-            .border(1.dp, Color(0xFFE11D48), shape) // Nothing Red border
-            .clickable {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                onResetEv() // Resets EV to 0 on tap as requested!
-            }
-            .padding(horizontal = 8.dp, vertical = 3.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        // Reset Badge (Clickable to reset EV to 0)
+        val sign = if (evIndex > 0) "+$evIndex" else "$evIndex"
+        Box(
+            modifier = Modifier
+                .clip(shape)
+                .background(if (evIndex != 0) Color(0x33E11D48) else Color(0xFF27272A))
+                .border(1.dp, if (evIndex != 0) Color(0xFFE11D48) else Color(0xFF3F3F46), shape)
+                .clickable(enabled = evIndex != 0) {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onResetEv()
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "EV IN POSITION $sign",
-                color = Color(0xFFFF4D6D),
-                fontSize = 9.sp,
+                text = if (evIndex == 0) "0 EV" else "$sign EV",
+                color = if (evIndex != 0) Color(0xFFFF4D6D) else Color(0xFFA1A1AA),
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.8.sp
-            )
-            Text(
-                text = "[RESET]",
-                color = Color(0xFFFAFAFA),
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
         }

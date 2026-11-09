@@ -123,6 +123,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             try { SharpnessMode.valueOf(settingsRepo.savedSharpness) } catch (e: Exception) { SharpnessMode.NORMAL }
         } else SharpnessMode.NORMAL
 
+        val initGrid = try { GridMode.valueOf(settingsRepo.savedGridMode) } catch (e: Exception) { GridMode.NONE }
+        val initRatio = try { AspectRatio.valueOf(settingsRepo.savedAspectRatio) } catch (e: Exception) { AspectRatio.RATIO_4_3 }
+        val initHist = settingsRepo.savedHistogramVisible
+        val initHorizon = settingsRepo.savedHorizonVisible
+        val initPeaking = settingsRepo.savedPeakingEnabled
+        val initZebra = settingsRepo.savedZebraEnabled
+
         _uiState.update {
             it.copy(
                 availableLenses = allLenses,
@@ -132,6 +139,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 minZoomRatio = minZoom,
                 maxZoomRatio = maxZoom,
                 capabilities = caps,
+                aspectRatio = initRatio,
                 exposureMode = initMode,
                 iso = initIso,
                 shutterSpeedNanos = initShutter,
@@ -145,7 +153,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 selectedMegapixels = defaultRes?.mpLabel ?: "12 MP",
                 isResumeSettingsEnabled = isResume,
                 noiseReductionMode = initNr,
-                sharpnessMode = initSharp
+                sharpnessMode = initSharp,
+                gridMode = initGrid,
+                isHistogramVisible = initHist,
+                isHorizonLevelVisible = initHorizon,
+                isFocusPeakingEnabled = initPeaking,
+                isZebraStripesEnabled = initZebra
             )
         }
     }
@@ -285,22 +298,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             GridMode.GOLDEN -> GridMode.NONE
         }
         _uiState.update { it.copy(gridMode = next) }
+        settingsRepo.savedGridMode = next.name
     }
 
     fun toggleHistogram() {
-        _uiState.update { it.copy(isHistogramVisible = !it.isHistogramVisible) }
+        val next = !_uiState.value.isHistogramVisible
+        _uiState.update { it.copy(isHistogramVisible = next) }
+        settingsRepo.savedHistogramVisible = next
     }
 
     fun toggleHorizon() {
-        _uiState.update { it.copy(isHorizonLevelVisible = !it.isHorizonLevelVisible) }
+        val next = !_uiState.value.isHorizonLevelVisible
+        _uiState.update { it.copy(isHorizonLevelVisible = next) }
+        settingsRepo.savedHorizonVisible = next
     }
 
     fun toggleFocusPeaking() {
-        _uiState.update { it.copy(isFocusPeakingEnabled = !it.isFocusPeakingEnabled) }
+        val next = !_uiState.value.isFocusPeakingEnabled
+        _uiState.update { it.copy(isFocusPeakingEnabled = next) }
+        settingsRepo.savedPeakingEnabled = next
     }
 
     fun toggleZebraStripes() {
-        _uiState.update { it.copy(isZebraStripesEnabled = !it.isZebraStripesEnabled) }
+        val next = !_uiState.value.isZebraStripesEnabled
+        _uiState.update { it.copy(isZebraStripesEnabled = next) }
+        settingsRepo.savedZebraEnabled = next
     }
 
     fun openReviewDialog() {
@@ -528,6 +550,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 selectedMegapixels = topRes?.mpLabel ?: it.selectedMegapixels
             )
         }
+        settingsRepo.savedAspectRatio = ratio.name
 
         val cameraId = _uiState.value.currentCameraId
         cameraController.switchCamera(cameraId, surface, ratio) { width, height ->
