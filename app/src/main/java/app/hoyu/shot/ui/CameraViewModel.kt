@@ -2,12 +2,15 @@ package app.hoyu.shot.ui
 
 import android.app.Application
 import android.view.Surface
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hoyu.shot.camera.Camera2Controller
 import app.hoyu.shot.camera.CameraHardwareInspector
 import app.hoyu.shot.model.*
 import app.hoyu.shot.sensors.HorizonSensorManager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +26,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val inspector = CameraHardwareInspector(application)
 
     private var activeSurface: Surface? = null
+    private var timerJob: Job? = null
 
     private val cameraController = Camera2Controller(
         context = application,
@@ -37,8 +41,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         },
-        onPhotoSaved = { uriString ->
-            _uiState.update { it.copy(isCapturing = false, lastCapturedUri = uriString) }
+        onPhotoSaved = { info ->
+            _uiState.update {
+                it.copy(
+                    isCapturing = false,
+                    lastCapturedPhoto = info
+                )
+            }
         },
         onError = { err ->
             _uiState.update { it.copy(errorMessage = err, isCapturing = false) }
@@ -98,6 +107,101 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         _uiState.update { it.copy(isCameraReady = true) }
         applyCurrentSettings()
+    }
+
+    fun onTouchFocus(offset: Offset, viewWidth: Int, viewHeight: Int) {
+        if (viewWidth <= 0 || viewHeight <= 0) return
+
+        val normX = (offset.x / viewWidth).coerceIn(0f, 1f)
+        val normY = (offset.y / viewHeight).coerceIn(0f, 1f)
+
+        _uiState.update {
+            it.copy(
+                tapFocusPoint = TapFocusPoint(offset, FocusState.FOCUSING, System.currentTimeMillis()),
+                isManualFocusEnabled = false
+            )
+        }
+
+        cameraController.triggerTapToFocus(normX, normY) { success ->
+            _uiState.update { current ->
+                val prevPoint = current.tapFocusPoint
+                if (prevPoint != null) {
+                    current.copy(
+                        tapFocusPoint = prevPoint.copy(
+                            state = if (success) FocusState.LOCKED_SUCCESS else FocusState.LOCKED_FAILED
+                        )
+                    )
+                } else current
+            }
+        }
+    }
+
+    fun toggleAeLock() {
+        val newLocked = !_uiState.value.isAeLocked
+        _uiState.update { it.copy(isAeLocked = newLocked) }
+        cameraController.setAeLock(newLocked)
+    }
+
+    fun toggleAfLock() {
+        val newLocked = !_uiState.value.isAfLocked
+        _uiState.update { it.copy(isAfLocked = newLocked) }
+        cameraController.setAfLock(newLocked)
+    }
+
+    fun toggleFlash() {
+        val next = when (_uiState.value.flashMode) {
+            FlashMode.OFF -> FlashMode.AUTO
+            FlashMode.AUTO -> FlashMode.ON
+            FlashMode.ON -> FlashMode.TORCH
+            FlashMode.TORCH -> FlashMode.OFF
+        }
+        _uiState.update { it.copy(flashMode = next) }
+        applyCurrentSettings()
+    }
+
+    fun toggleTimer() {
+        val next = when (_uiState.value.timerMode) {
+            TimerMode.OFF -> TimerMode.SEC_3
+            TimerMode.SEC_3 -> TimerMode.SEC_5
+            TimerMode.SEC_5 -> TimerMode.SEC_10
+            TimerMode.SEC_10 -> TimerMode.OFF
+        }
+        _uiState.update { it.copy(timerMode = next) }
+    }
+
+    fun toggleGrid() {
+        val next = when (_uiState.value.gridMode) {
+            GridMode.NONE -> GridMode.THIRDS
+            GridMode.THIRDS -> GridMode.GOLDEN
+            GridMode.GOLDEN -> GridMode.NONE
+        }
+        _uiState.update { it.copy(gridMode = next) }
+    }
+
+    fun toggleHistogram() {
+        _uiState.update { it.copy(isHistogramVisible = !it.isHistogramVisible) }
+    }
+
+    fun toggleHorizon() {
+        _uiState.update { it.copy(isHorizonLevelVisible = !it.isHorizonLevelVisible) }
+    }
+
+    fun toggleFocusPeaking() {
+        _uiState.update { it.copy(isFocusPeakingEnabled = !it.isFocusPeakingEnabled) }
+    }
+
+    fun toggleZebraStripes() {
+        _uiState.update { it.copy(isZebraStripesEnabled = !it.isZebraStripesEnabled) }
+    }
+
+    fun openReviewDialog() {
+        if (_uiState.value.lastCapturedPhoto != null) {
+            _uiState.update { it.copy(isReviewDialogVisible = true) }
+        }
+    }
+
+    fun closeReviewDialog() {
+        _uiState.update { it.copy(isReviewDialogVisible = false) }
     }
 
     fun selectLens(lens: LensItem) {
@@ -212,8 +316,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun takePicture() {
-        _uiState.update { it.copy(isCapturing = true) }
-        cameraController.takePicture(captureRaw = _uiState.value.captureRaw)
+        if (_uiState.value.isCapturing) return
+
+        val timer = _uiState.value.timerMode.seconds
+        if (timer > 0) {
+            timerJob?.cancel()
+            timerJob = viewModelScope.launch {
+                for (s in timer downTo 1) {
+                    _uiState.update { it.copy(timerCountdownSeconds = s) }
+                    delay(1000)
+                }
+                _uiState.update { it.copy(timerCountdownSeconds = null, isCapturing = true) }
+                cameraController.takePicture(captureRaw = _uiState.value.captureRaw)
+            }
+        } else {
+            _uiState.update { it.copy(isCapturing = true) }
+            cameraController.takePicture(captureRaw = _uiState.value.captureRaw)
+        }
     }
 
     private fun applyCurrentSettings() {
@@ -227,12 +346,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             evIndex = s.evCompensationIndex,
             whiteBalancePreset = s.whiteBalancePreset,
             kelvin = s.kelvinTemperature,
-            zoomRatio = s.currentZoomRatio
+            zoomRatio = s.currentZoomRatio,
+            flashMode = s.flashMode
         )
     }
 
     override fun onCleared() {
         super.onCleared()
+        timerJob?.cancel()
         stopSensors()
         cameraController.closeCamera()
         cameraController.stopBackgroundThread()

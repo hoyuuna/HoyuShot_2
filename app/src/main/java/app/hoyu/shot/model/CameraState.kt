@@ -1,5 +1,7 @@
 package app.hoyu.shot.model
 
+import androidx.compose.ui.geometry.Offset
+
 data class HistogramData(
     val lumaBins: IntArray = IntArray(256),
     val redBins: IntArray = IntArray(256),
@@ -12,6 +14,19 @@ data class HorizonOrientation(
     val pitchDegrees: Float = 0f,
     val rollDegrees: Float = 0f,
     val isLevel: Boolean = false
+)
+
+enum class FocusState {
+    IDLE,
+    FOCUSING,
+    LOCKED_SUCCESS,
+    LOCKED_FAILED
+}
+
+data class TapFocusPoint(
+    val offset: Offset,
+    val state: FocusState = FocusState.FOCUSING,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class CameraUiState(
@@ -31,6 +46,11 @@ data class CameraUiState(
     val aspectRatio: AspectRatio = AspectRatio.RATIO_4_3,
     val previewSize: Pair<Int, Int> = Pair(1920, 1440),
 
+    // Tap-to-Focus & Locks
+    val tapFocusPoint: TapFocusPoint? = null,
+    val isAeLocked: Boolean = false,
+    val isAfLocked: Boolean = false,
+
     // Manual Exposure Controls
     val exposureMode: ExposureMode = ExposureMode.AUTO,
     val iso: Int = 100,
@@ -45,12 +65,19 @@ data class CameraUiState(
     val actualIso: Int = 100,
     val actualShutterSpeedNanos: Long = 10_000_000L,
 
-    // Capture & Format options
+    // Capture, Timer & Format options
     val captureRaw: Boolean = false,
     val isCapturing: Boolean = false,
-    val lastCapturedUri: String? = null,
+    val timerMode: TimerMode = TimerMode.OFF,
+    val timerCountdownSeconds: Int? = null,
+    val flashMode: FlashMode = FlashMode.OFF,
 
-    // On-Screen Pro Aids
+    // Gallery & Review
+    val lastCapturedPhoto: CapturedPhotoInfo? = null,
+    val isReviewDialogVisible: Boolean = false,
+
+    // Viewfinder Pro Aids & Overlays
+    val gridMode: GridMode = GridMode.NONE,
     val isHistogramVisible: Boolean = true,
     val isHorizonLevelVisible: Boolean = true,
     val isFocusPeakingEnabled: Boolean = false,

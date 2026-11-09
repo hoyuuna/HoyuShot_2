@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.model
+package app.hoyu.shot.model
 
 enum class ExposureMode(val label: String, val description: String) {
     AUTO("AUTO", "Fully automated exposure and focus"),
@@ -25,3 +25,33 @@ enum class WhiteBalancePreset(val label: String) {
     CUSTOM_KELVIN("Kelvin")
 }
 
+enum class GridMode(val label: String) {
+    NONE("Off"),
+    THIRDS("3x3"),
+    GOLDEN("Phi")
+}
+
+enum class FlashMode(val label: String) {
+    OFF("Off"),
+    AUTO("Auto"),
+    ON("On"),
+    TORCH("Torch")
+}
+
+enum class TimerMode(val seconds: Int, val label: String) {
+    OFF(0, "Off"),
+    SEC_3(3, "3s"),
+    SEC_5(5, "5s"),
+    SEC_10(10, "10s")
+}
+
+data class CapturedPhotoInfo(
+    val uriString: String,
+    val isRaw: Boolean,
+    val width: Int,
+    val height: Int,
+    val iso: Int,
+    val shutterSpeed: String,
+    val focalLength: String,
+    val timestamp: Long
+)

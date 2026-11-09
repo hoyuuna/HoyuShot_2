@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.hardware.camera2.*
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
 import android.media.ImageReader
 import android.os.Build
@@ -26,7 +27,7 @@ class Camera2Controller(
     private val context: Context,
     private val onHistogramReady: (HistogramData) -> Unit,
     private val onFrameMetadata: (actualIso: Int, actualShutterNanos: Long) -> Unit,
-    private val onPhotoSaved: (uriString: String) -> Unit,
+    private val onPhotoSaved: (CapturedPhotoInfo) -> Unit,
     private val onError: (String) -> Unit
 ) {
     private val TAG = "Camera2Controller"
@@ -50,6 +51,19 @@ class Camera2Controller(
     private val histogramAnalyzer = HistogramAnalyzer()
 
     private var isCapturing = false
+    private var isAeLocked = false
+    private var isAfLocked = false
+
+    private var currentExposureMode = ExposureMode.AUTO
+    private var currentIso = 100
+    private var currentShutterNanos = 10_000_000L
+    private var currentFocusDistance = 0f
+    private var currentIsManualFocus = false
+    private var currentEvIndex = 0
+    private var currentWbPreset = WhiteBalancePreset.AUTO
+    private var currentKelvin = 5500
+    private var currentZoomRatio = 1.0f
+    private var currentFlashMode = FlashMode.OFF
 
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
     val capabilities: StateFlow<HardwareCapabilities?> = _capabilities.asStateFlow()
@@ -110,7 +124,7 @@ class Camera2Controller(
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     cameraDevice = null
-                    onError("Camera error: $error")
+                    onError("Camera error code: $error")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -155,7 +169,7 @@ class Camera2Controller(
             }
         }
 
-        // 2. Full-Res JPEG stream
+        // 2. Full-Res JPEG stream matching aspect ratio
         val jpegSizes = map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
         val targetRatioVal = when (targetRatio) {
             AspectRatio.RATIO_4_3 -> 4.0 / 3.0
@@ -213,7 +227,7 @@ class Camera2Controller(
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
                     captureSession = session
-                    startRepeatingPreview()
+                    applyAllSettingsInternal()
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -223,17 +237,6 @@ class Camera2Controller(
         } catch (e: Exception) {
             Log.e(TAG, "Error creating capture session", e)
             onError("CaptureSession creation failed: ${e.message}")
-        }
-    }
-
-    private fun startRepeatingPreview() {
-        val session = captureSession ?: return
-        val builder = previewRequestBuilder ?: return
-
-        try {
-            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start repeating preview", e)
         }
     }
 
@@ -250,6 +253,75 @@ class Camera2Controller(
         }
     }
 
+    /**
+     * Tap to Focus and Meter on specific coordinate
+     */
+    fun triggerTapToFocus(
+        normX: Float,
+        normY: Float,
+        onFocusResult: (Boolean) -> Unit
+    ) {
+        val chars = currentCharacteristics ?: return
+        val builder = previewRequestBuilder ?: return
+        val session = captureSession ?: return
+
+        try {
+            val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                ?: Rect(0, 0, 4000, 3000)
+
+            // Convert normalized (0..1) screen coordinates to sensor active array coordinates
+            val sensorX = (normY * activeArray.width()).toInt().coerceIn(0, activeArray.width())
+            val sensorY = ((1f - normX) * activeArray.height()).toInt().coerceIn(0, activeArray.height())
+
+            val halfBox = (activeArray.width() * 0.08f).toInt()
+            val meteringBox = Rect(
+                (sensorX - halfBox).coerceAtLeast(0),
+                (sensorY - halfBox).coerceAtLeast(0),
+                (sensorX + halfBox).coerceAtMost(activeArray.width()),
+                (sensorY + halfBox).coerceAtMost(activeArray.height())
+            )
+
+            val meteringRect = MeteringRectangle(meteringBox, MeteringRectangle.METERING_WEIGHT_MAX)
+
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(meteringRect))
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(meteringRect))
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+            builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+
+            session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    super.onCaptureCompleted(session, request, result)
+                    val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+                    val isSuccess = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                            afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED
+                    onFocusResult(isSuccess)
+
+                    // Resume repeating request with triggered region
+                    builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                }
+            }, backgroundHandler)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Tap-to-focus failed", e)
+            onFocusResult(false)
+        }
+    }
+
+    fun setAeLock(locked: Boolean) {
+        this.isAeLocked = locked
+        applyAllSettingsInternal()
+    }
+
+    fun setAfLock(locked: Boolean) {
+        this.isAfLocked = locked
+        applyAllSettingsInternal()
+    }
+
     fun updateManualSettings(
         exposureMode: ExposureMode,
         iso: Int,
@@ -259,74 +331,111 @@ class Camera2Controller(
         evIndex: Int,
         whiteBalancePreset: WhiteBalancePreset,
         kelvin: Int,
-        zoomRatio: Float
+        zoomRatio: Float,
+        flashMode: FlashMode
     ) {
+        this.currentExposureMode = exposureMode
+        this.currentIso = iso
+        this.currentShutterNanos = shutterNanos
+        this.currentFocusDistance = focusDistance
+        this.currentIsManualFocus = isManualFocus
+        this.currentEvIndex = evIndex
+        this.currentWbPreset = whiteBalancePreset
+        this.currentKelvin = kelvin
+        this.currentZoomRatio = zoomRatio
+        this.currentFlashMode = flashMode
+
+        applyAllSettingsInternal()
+    }
+
+    private fun applyAllSettingsInternal() {
         val builder = previewRequestBuilder ?: return
         val session = captureSession ?: return
         val chars = currentCharacteristics ?: return
 
         try {
-            // Apply Optical / Digital Zoom
+            // 1. Zoom
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                 if (zoomRange != null) {
-                    val clamped = zoomRatio.coerceIn(zoomRange.lower, zoomRange.upper)
+                    val clamped = currentZoomRatio.coerceIn(zoomRange.lower, zoomRange.upper)
                     builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clamped)
                 }
             } else {
                 val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                if (activeArray != null && zoomRatio > 1.0f) {
-                    val cropW = (activeArray.width() / zoomRatio).toInt()
-                    val cropH = (activeArray.height() / zoomRatio).toInt()
+                if (activeArray != null && currentZoomRatio > 1.0f) {
+                    val cropW = (activeArray.width() / currentZoomRatio).toInt()
+                    val cropH = (activeArray.height() / currentZoomRatio).toInt()
                     val cropX = (activeArray.width() - cropW) / 2
                     val cropY = (activeArray.height() - cropH) / 2
                     builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(cropX, cropY, cropX + cropW, cropY + cropH))
                 }
             }
 
-            // Exposure controls
-            when (exposureMode) {
+            // 2. Exposure Mode
+            when (currentExposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, evIndex)
+                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, currentEvIndex)
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, shutterNanos)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
                 }
                 ExposureMode.ISO_PRIORITY -> {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, shutterNanos)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
                 }
                 ExposureMode.MANUAL -> {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, shutterNanos)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
                 }
             }
 
-            // Focus controls
-            if (isManualFocus) {
+            // 3. Locks
+            builder.set(CaptureRequest.CONTROL_AE_LOCK, isAeLocked)
+
+            // 4. Focus
+            if (currentIsManualFocus) {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance)
+                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
             } else {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                if (isAfLocked) {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                }
             }
 
-            applyWhiteBalance(builder, whiteBalancePreset, kelvin)
+            // 5. White Balance
+            applyWhiteBalance(builder, currentWbPreset, currentKelvin)
+
+            // 6. Flash / Torch
+            when (currentFlashMode) {
+                FlashMode.OFF -> {
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                }
+                FlashMode.AUTO -> {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                }
+                FlashMode.ON -> {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                }
+                FlashMode.TORCH -> {
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                }
+            }
+
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to update camera settings", e)
+            Log.e(TAG, "Failed to apply camera settings", e)
         }
     }
 
-    private fun applyWhiteBalance(
-        builder: CaptureRequest.Builder,
-        preset: WhiteBalancePreset,
-        kelvin: Int
-    ) {
+    private fun applyWhiteBalance(builder: CaptureRequest.Builder, preset: WhiteBalancePreset, kelvin: Int) {
         when (preset) {
             WhiteBalancePreset.AUTO -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             WhiteBalancePreset.DAYLIGHT -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
@@ -355,6 +464,9 @@ class Camera2Controller(
         return RggbChannelVector(r, g, g, b)
     }
 
+    /**
+     * Executes Still Photo Capture with Pre-capture Lock Routine
+     */
     fun takePicture(captureRaw: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
@@ -450,7 +562,19 @@ class Camera2Controller(
                 buffer.get(bytes)
                 outputStream.write(bytes)
             }
-            onPhotoSaved(destUri.toString())
+
+            val shutterStr = HardwareCapabilities.formatShutterSpeed(currentShutterNanos)
+            val info = CapturedPhotoInfo(
+                uriString = destUri.toString(),
+                isRaw = false,
+                width = image.width,
+                height = image.height,
+                iso = currentIso,
+                shutterSpeed = shutterStr,
+                focalLength = "1x",
+                timestamp = System.currentTimeMillis()
+            )
+            onPhotoSaved(info)
         }
     }
 
@@ -477,7 +601,19 @@ class Camera2Controller(
                 dngCreator.writeImage(outputStream, image)
                 dngCreator.close()
             }
-            Log.d(TAG, "RAW DNG saved to $uri")
+
+            val shutterStr = HardwareCapabilities.formatShutterSpeed(currentShutterNanos)
+            val info = CapturedPhotoInfo(
+                uriString = destUri.toString(),
+                isRaw = true,
+                width = image.width,
+                height = image.height,
+                iso = currentIso,
+                shutterSpeed = shutterStr,
+                focalLength = "1x",
+                timestamp = System.currentTimeMillis()
+            )
+            onPhotoSaved(info)
         }
     }
 

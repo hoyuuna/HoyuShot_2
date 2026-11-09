@@ -1,9 +1,12 @@
 package app.hoyu.shot.ui
 
+import android.view.HapticFeedbackConstants
 import android.view.SurfaceHolder
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -16,11 +19,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import app.hoyu.shot.model.AspectRatio
 import app.hoyu.shot.model.DialParameter
 import app.hoyu.shot.model.HardwareCapabilities
 import app.hoyu.shot.ui.components.*
@@ -31,7 +37,9 @@ fun CameraScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val view = LocalView.current
     var surfaceViewRef by remember { mutableStateOf<AutoFitSurfaceView?>(null) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
     DisposableEffect(Unit) {
         viewModel.startSensors()
@@ -50,11 +58,18 @@ fun CameraScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onSizeChanged { containerSize = it }
             .pointerInput(uiState.currentZoomRatio) {
                 detectTransformGestures { _, _, zoom, _ ->
                     if (zoom != 1.0f) {
                         viewModel.setZoomRatio(uiState.currentZoomRatio * zoom)
                     }
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    viewModel.onTouchFocus(offset, containerSize.width, containerSize.height)
                 }
             }
     ) {
@@ -81,14 +96,24 @@ fun CameraScreen(
                         })
                     }
                 },
-                update = { view ->
+                update = { v ->
                     val (camWidth, camHeight) = uiState.previewSize
-                    view.setAspectRatio(camHeight, camWidth)
+                    v.setAspectRatio(camHeight, camWidth)
                 }
             )
         }
 
-        // 2. Electronic Horizon Level Overlay
+        // 2. Composition Grid Overlay (Rule of Thirds / Golden Ratio)
+        GridOverlay(gridMode = uiState.gridMode)
+
+        // 3. Focus Peaking & Zebra Stripes Overlay
+        PeakingAndZebraOverlay(
+            isPeakingEnabled = uiState.isFocusPeakingEnabled,
+            isZebraEnabled = uiState.isZebraStripesEnabled,
+            histogram = uiState.histogram
+        )
+
+        // 4. Electronic Horizon Level Overlay
         if (uiState.isHorizonLevelVisible) {
             HorizonLevelIndicator(
                 orientation = uiState.horizon,
@@ -96,71 +121,113 @@ fun CameraScreen(
             )
         }
 
-        // 3. Top HUD: App Tag, Aspect Ratio Switcher & Live Histogram
-        Row(
+        // 5. Tap-to-Focus Reticle Ring
+        FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
+
+        // 6. Top Section: Settings Bar & HUD
+        Column(
             modifier = Modifier
+                .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
         ) {
-            // Hardware capability & Active Lens tag
-            val caps = uiState.capabilities
-            Column {
-                Text(
-                    text = "HOYUSHOT",
-                    color = Color(0xFFFFD600),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp
-                )
-                if (caps != null) {
-                    val activeLabel = uiState.currentLens?.label ?: "1x"
-                    Text(
-                        text = "$activeLabel | ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW" else "NO RAW"}",
-                        color = if (caps.isLevelFullOrHigher) Color(0xFF00E676) else Color(0xFFFF9100),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            // Quick toggles for Flash, Timer, Grid, Peaking, Zebra, Aspect Ratio, RAW
+            TopSettingsBar(
+                uiState = uiState,
+                onToggleFlash = { viewModel.toggleFlash() },
+                onToggleTimer = { viewModel.toggleTimer() },
+                onToggleGrid = { viewModel.toggleGrid() },
+                onToggleHistogram = { viewModel.toggleHistogram() },
+                onToggleHorizon = { viewModel.toggleHorizon() },
+                onTogglePeaking = { viewModel.toggleFocusPeaking() },
+                onToggleZebra = { viewModel.toggleZebraStripes() },
+                onSelectAspectRatio = { viewModel.setAspectRatio(it) },
+                onToggleRaw = { viewModel.toggleRaw() }
+            )
 
-            // Aspect Ratio Selector (4:3, 16:9, 1:1)
+            // Top Status readout + Live Histogram
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0x80000000))
-                    .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                listOf(AspectRatio.RATIO_4_3, AspectRatio.RATIO_16_9, AspectRatio.RATIO_1_1).forEach { ratio ->
-                    val isSelected = uiState.aspectRatio == ratio
-                    Text(
-                        text = ratio.ratioName,
-                        color = if (isSelected) Color(0xFFFFD600) else Color(0x88FFFFFF),
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        modifier = Modifier
-                            .clickable { viewModel.setAspectRatio(ratio) }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "HOYUSHOT",
+                            color = Color(0xFFFFD600),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        // AE-L / AF-L indicators
+                        if (uiState.isAeLocked) {
+                            Text(
+                                text = "AE-L",
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier
+                                    .background(Color(0xFFFFD600), RoundedCornerShape(2.dp))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        if (uiState.isAfLocked) {
+                            Text(
+                                text = "AF-L",
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier
+                                    .background(Color(0xFF00E676), RoundedCornerShape(2.dp))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    val caps = uiState.capabilities
+                    if (caps != null) {
+                        val activeLabel = uiState.currentLens?.label ?: "1x"
+                        Text(
+                            text = "$activeLabel | ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW OK" else "NO RAW"}",
+                            color = if (caps.isLevelFullOrHigher) Color(0xFF00E676) else Color(0xFFFF9100),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
-            }
 
-            // Real-time RGB / Luma Histogram
-            if (uiState.isHistogramVisible) {
-                HistogramView(histogram = uiState.histogram)
+                if (uiState.isHistogramVisible) {
+                    HistogramView(histogram = uiState.histogram)
+                }
             }
         }
 
-        // 4. Error banner
+        // 7. Giant Timer Countdown Overlay
+        uiState.timerCountdownSeconds?.let { countdown ->
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$countdown",
+                    color = Color(0xFFFFD600),
+                    fontSize = 120.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        // 8. Error banner
         uiState.errorMessage?.let { error ->
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 80.dp)
+                    .padding(top = 90.dp)
                     .background(Color(0xD9D50000), RoundedCornerShape(8.dp))
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -168,7 +235,7 @@ fun CameraScreen(
             }
         }
 
-        // 5. Bottom Controls Group
+        // 9. Bottom Controls Group
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -176,18 +243,18 @@ fun CameraScreen(
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Lens Switcher (e.g. 0.6x, 1x, 3.2x, Front)
+            // Lens Switcher (0.6x, 1x, 3.2x, Front)
             if (uiState.availableLenses.size > 1) {
                 LensSelector(
                     lenses = uiState.availableLenses,
                     currentLens = uiState.currentLens,
                     onLensSelect = { selectedLens -> viewModel.selectLens(selectedLens) },
                     onFlipFacing = { viewModel.toggleCameraFacing() },
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = 6.dp)
                 )
             }
 
-            // Dial Wheel Slider
+            // Dial Wheel Slider (ISO, Shutter, Focus, EV, Kelvin)
             when (uiState.activeDialParameter) {
                 DialParameter.ISO -> {
                     val minIso = uiState.capabilities?.isoRange?.lower ?: 50
@@ -279,21 +346,30 @@ fun CameraScreen(
                 onToggleRaw = { viewModel.toggleRaw() }
             )
 
-            // Shutter Button Row
-            Box(
+            // Bottom Shutter Bar with Thumbnail & Lock buttons
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black)
-                    .padding(vertical = 16.dp),
-                contentAlignment = Alignment.Center
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Left: Quick Thumbnail Gallery Preview
+                QuickThumbnail(
+                    photoInfo = uiState.lastCapturedPhoto,
+                    onClick = { viewModel.openReviewDialog() }
+                )
+
+                // Center: Big Shutter Trigger Button
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(74.dp)
                         .border(3.dp, Color.White, CircleShape)
                         .padding(5.dp)
                         .background(if (uiState.isCapturing) Color.Gray else Color.White, CircleShape)
                         .clickable(enabled = !uiState.isCapturing) {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             viewModel.takePicture()
                         },
                     contentAlignment = Alignment.Center
@@ -306,7 +382,56 @@ fun CameraScreen(
                         )
                     }
                 }
+
+                // Right: AE-Lock / AF-Lock quick toggle buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (uiState.isAeLocked) Color(0xFFFFD600) else Color(0x33FFFFFF))
+                            .clickable {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                viewModel.toggleAeLock()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "AEL",
+                            color = if (uiState.isAeLocked) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (uiState.isAfLocked) Color(0xFF00E676) else Color(0x33FFFFFF))
+                            .clickable {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                viewModel.toggleAfLock()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "AFL",
+                            color = if (uiState.isAfLocked) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
             }
+        }
+
+        // 10. Fullscreen EXIF Review Dialog
+        if (uiState.isReviewDialogVisible && uiState.lastCapturedPhoto != null) {
+            ExifViewerDialog(
+                photoInfo = uiState.lastCapturedPhoto!!,
+                onDismiss = { viewModel.closeReviewDialog() }
+            )
         }
     }
 }
