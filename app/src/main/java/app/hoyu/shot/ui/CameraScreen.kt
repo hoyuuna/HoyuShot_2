@@ -4,6 +4,7 @@ import android.view.SurfaceHolder
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,10 +41,8 @@ fun CameraScreen(
         }
     }
 
-    // Keep aspect ratio synchronized with camera preview dimensions
     LaunchedEffect(uiState.previewSize, uiState.aspectRatio) {
         val (camWidth, camHeight) = uiState.previewSize
-        // In portrait mode, display width is camera height, display height is camera width
         surfaceViewRef?.setAspectRatio(camHeight, camWidth)
     }
 
@@ -50,8 +50,15 @@ fun CameraScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .pointerInput(uiState.currentZoomRatio) {
+                detectTransformGestures { _, _, zoom, _ ->
+                    if (zoom != 1.0f) {
+                        viewModel.setZoomRatio(uiState.currentZoomRatio * zoom)
+                    }
+                }
+            }
     ) {
-        // 1. Camera2 Viewfinder with AutoFitSurfaceView (Centers preview with NO stretching)
+        // 1. Camera2 Viewfinder with AutoFitSurfaceView
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -109,8 +116,9 @@ fun CameraScreen(
                     letterSpacing = 2.sp
                 )
                 if (caps != null) {
+                    val activeLabel = uiState.currentLens?.label ?: "1x"
                     Text(
-                        text = "${uiState.currentLensLabel} | ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW" else "NO RAW"}",
+                        text = "$activeLabel | ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW" else "NO RAW"}",
                         color = if (caps.isLevelFullOrHigher) Color(0xFF00E676) else Color(0xFFFF9100),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -168,18 +176,18 @@ fun CameraScreen(
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Lens Switcher (e.g. 0.5x, 1x, 2x, 3x, Front)
-            if (uiState.availableCameras.size > 1) {
+            // Lens Switcher (e.g. 0.6x, 1x, 3.2x, Front)
+            if (uiState.availableLenses.size > 1) {
                 LensSelector(
-                    cameras = uiState.availableCameras,
-                    currentCameraId = uiState.currentCameraId,
-                    onCameraSelect = { newId -> viewModel.switchCamera(newId) },
+                    lenses = uiState.availableLenses,
+                    currentLens = uiState.currentLens,
+                    onLensSelect = { selectedLens -> viewModel.selectLens(selectedLens) },
                     onFlipFacing = { viewModel.toggleCameraFacing() },
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
 
-            // Dial Wheel Slider (Appears when user taps ISO / Shutter / Focus / EV / WB)
+            // Dial Wheel Slider
             when (uiState.activeDialParameter) {
                 DialParameter.ISO -> {
                     val minIso = uiState.capabilities?.isoRange?.lower ?: 50
@@ -279,7 +287,6 @@ fun CameraScreen(
                     .padding(vertical = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Large circular Shutter Trigger
                 Box(
                     modifier = Modifier
                         .size(72.dp)

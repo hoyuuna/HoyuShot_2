@@ -19,20 +19,18 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.hoyu.shot.model.CameraDeviceInfo
+import app.hoyu.shot.model.LensItem
 
 @Composable
 fun LensSelector(
-    cameras: List<CameraDeviceInfo>,
-    currentCameraId: String,
-    onCameraSelect: (String) -> Unit,
+    lenses: List<LensItem>,
+    currentLens: LensItem?,
+    onLensSelect: (LensItem) -> Unit,
     onFlipFacing: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
-
-    // Group cameras into back lenses and front
-    val backLenses = cameras.filter { it.isBack }
+    val backLenses = lenses.filter { !it.isFront }
 
     Row(
         modifier = modifier
@@ -43,22 +41,22 @@ fun LensSelector(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Back lens buttons (e.g. 0.5x, 1x, 2x, 3x)
-        backLenses.forEach { cam ->
-            val isSelected = cam.cameraId == currentCameraId
+        // Back lens buttons (e.g. 0.6x, 1x, 3.2x)
+        backLenses.forEach { lens ->
+            val isSelected = currentLens?.id == lens.id
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(if (isSelected) Color(0xFFFFD600) else Color.Transparent)
+                    .background(if (isSelected) Color(0xFFFFD600) else Color(0x22FFFFFF))
                     .clickable {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        onCameraSelect(cam.cameraId)
+                        onLensSelect(lens)
                     },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = cam.label,
+                    text = lens.label,
                     color = if (isSelected) Color.Black else Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -67,11 +65,12 @@ fun LensSelector(
         }
 
         // Flip Front/Back Camera button
+        val isFrontSelected = currentLens?.isFront == true
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(36.dp)
                 .clip(CircleShape)
-                .background(Color(0x33FFFFFF))
+                .background(if (isFrontSelected) Color(0xFFFFD600) else Color(0x33FFFFFF))
                 .clickable {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     onFlipFacing()
@@ -81,7 +80,7 @@ fun LensSelector(
             Icon(
                 imageVector = Icons.Default.Cameraswitch,
                 contentDescription = "Switch Camera",
-                tint = Color.White,
+                tint = if (isFrontSelected) Color.Black else Color.White,
                 modifier = Modifier.size(18.dp)
             )
         }

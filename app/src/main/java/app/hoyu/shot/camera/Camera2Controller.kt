@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.ImageFormat
+import android.graphics.Rect
 import android.hardware.camera2.*
 import android.hardware.camera2.params.RggbChannelVector
 import android.media.ImageReader
@@ -87,8 +88,7 @@ class Camera2Controller(
             val chars = cameraManager.getCameraCharacteristics(cameraId)
             currentCharacteristics = chars
 
-            val caps = hardwareInspector.inspectAllAvailableCameras().find { it.cameraId == cameraId }?.capabilities
-                ?: hardwareInspector.inspectPrimaryBackCamera()
+            val caps = hardwareInspector.inspectCamera(cameraId)
             _capabilities.value = caps
 
             val optimalPreviewSize = caps?.findOptimalPreviewSize(targetRatio) ?: Pair(1920, 1080)
@@ -132,7 +132,7 @@ class Camera2Controller(
     private fun setupImageReaders(chars: CameraCharacteristics, targetRatio: AspectRatio) {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
 
-        // 1. Fast Analysis stream (YUV for histogram)
+        // 1. Fast Analysis stream
         val yuvSizes = map.getOutputSizes(ImageFormat.YUV_420_888)
         val optimalYuv = yuvSizes?.minByOrNull { it.width * it.height } ?: yuvSizes?.firstOrNull()
         if (optimalYuv != null) {
@@ -155,7 +155,7 @@ class Camera2Controller(
             }
         }
 
-        // 2. Full-Res JPEG stream matching aspect ratio
+        // 2. Full-Res JPEG stream
         val jpegSizes = map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
         val targetRatioVal = when (targetRatio) {
             AspectRatio.RATIO_4_3 -> 4.0 / 3.0
@@ -258,12 +258,33 @@ class Camera2Controller(
         isManualFocus: Boolean,
         evIndex: Int,
         whiteBalancePreset: WhiteBalancePreset,
-        kelvin: Int
+        kelvin: Int,
+        zoomRatio: Float
     ) {
         val builder = previewRequestBuilder ?: return
         val session = captureSession ?: return
+        val chars = currentCharacteristics ?: return
 
         try {
+            // Apply Optical / Digital Zoom
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                if (zoomRange != null) {
+                    val clamped = zoomRatio.coerceIn(zoomRange.lower, zoomRange.upper)
+                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clamped)
+                }
+            } else {
+                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (activeArray != null && zoomRatio > 1.0f) {
+                    val cropW = (activeArray.width() / zoomRatio).toInt()
+                    val cropH = (activeArray.height() / zoomRatio).toInt()
+                    val cropX = (activeArray.width() - cropW) / 2
+                    val cropY = (activeArray.height() - cropH) / 2
+                    builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(cropX, cropY, cropX + cropW, cropY + cropH))
+                }
+            }
+
+            // Exposure controls
             when (exposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
@@ -286,6 +307,7 @@ class Camera2Controller(
                 }
             }
 
+            // Focus controls
             if (isManualFocus) {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance)
@@ -357,6 +379,15 @@ class Camera2Controller(
                 captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, preview.get(CaptureRequest.CONTROL_AF_MODE))
                 captureBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, preview.get(CaptureRequest.LENS_FOCUS_DISTANCE))
                 captureBuilder.set(CaptureRequest.CONTROL_AWB_MODE, preview.get(CaptureRequest.CONTROL_AWB_MODE))
+
+                // Copy zoom
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val zoom = preview.get(CaptureRequest.CONTROL_ZOOM_RATIO)
+                    if (zoom != null) captureBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
+                } else {
+                    val crop = preview.get(CaptureRequest.SCALER_CROP_REGION)
+                    if (crop != null) captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, crop)
+                }
             }
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, 100.toByte())

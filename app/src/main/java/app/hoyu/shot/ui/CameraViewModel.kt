@@ -53,18 +53,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // Discover all cameras (Wide, Ultra-wide, Telephoto, Front)
-        val allCameras = inspector.inspectAllAvailableCameras()
-        val defaultCam = allCameras.firstOrNull { it.isBack } ?: allCameras.firstOrNull()
+        // Discover all physical and logical lenses (0.6x, 1x, 3.2x, Front)
+        val allLenses = inspector.discoverAllLenses()
+        val defaultLens = allLenses.find { !it.isFront && it.label == "1x" }
+            ?: allLenses.firstOrNull { !it.isFront }
+            ?: allLenses.firstOrNull()
+
+        val initialCameraId = defaultLens?.cameraId ?: "0"
+        val caps = inspector.inspectCamera(initialCameraId)
+
+        val minZoom = allLenses.filter { !it.isFront }.minOfOrNull { it.zoomRatio } ?: 0.6f
+        val maxZoom = 30.0f
 
         _uiState.update {
             it.copy(
-                availableCameras = allCameras,
-                currentCameraId = defaultCam?.cameraId ?: "0",
-                currentLensLabel = defaultCam?.label ?: "1x",
-                capabilities = defaultCam?.capabilities,
-                iso = defaultCam?.capabilities?.isoRange?.lower ?: 100,
-                shutterSpeedNanos = defaultCam?.capabilities?.shutterSpeedRangeNanos?.lower ?: 10_000_000L
+                availableLenses = allLenses,
+                currentLens = defaultLens,
+                currentCameraId = initialCameraId,
+                currentZoomRatio = defaultLens?.zoomRatio ?: 1.0f,
+                minZoomRatio = minZoom,
+                maxZoomRatio = maxZoom,
+                capabilities = caps,
+                iso = caps?.isoRange?.lower ?: 100,
+                shutterSpeedNanos = caps?.shutterSpeedRangeNanos?.lower ?: 10_000_000L
             )
         }
     }
@@ -89,37 +100,50 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applyCurrentSettings()
     }
 
-    fun switchCamera(newCameraId: String) {
+    fun selectLens(lens: LensItem) {
         val surface = activeSurface ?: return
-        if (newCameraId == _uiState.value.currentCameraId) return
-
-        val camInfo = _uiState.value.availableCameras.find { it.cameraId == newCameraId } ?: return
-        val ratio = _uiState.value.aspectRatio
+        val currentCamId = _uiState.value.currentCameraId
 
         _uiState.update {
             it.copy(
-                currentCameraId = newCameraId,
-                currentLensLabel = camInfo.label,
-                capabilities = camInfo.capabilities,
-                // Adjust ranges if needed
-                iso = it.iso.coerceIn(
-                    camInfo.capabilities.isoRange?.lower ?: 100,
-                    camInfo.capabilities.isoRange?.upper ?: 3200
-                )
+                currentLens = lens,
+                currentZoomRatio = lens.zoomRatio
             )
         }
 
-        cameraController.switchCamera(newCameraId, surface, ratio) { width, height ->
-            _uiState.update { it.copy(previewSize = Pair(width, height)) }
+        if (lens.cameraId != currentCamId) {
+            val caps = inspector.inspectCamera(lens.cameraId)
+            _uiState.update {
+                it.copy(
+                    currentCameraId = lens.cameraId,
+                    capabilities = caps
+                )
+            }
+            cameraController.switchCamera(lens.cameraId, surface, _uiState.value.aspectRatio) { width, height ->
+                _uiState.update { it.copy(previewSize = Pair(width, height)) }
+            }
         }
+
+        applyCurrentSettings()
+    }
+
+    fun setZoomRatio(zoom: Float) {
+        val clamped = zoom.coerceIn(_uiState.value.minZoomRatio, _uiState.value.maxZoomRatio)
+        _uiState.update { it.copy(currentZoomRatio = clamped) }
         applyCurrentSettings()
     }
 
     fun toggleCameraFacing() {
-        val currentIsBack = _uiState.value.capabilities?.isFacingBack ?: true
-        val targetCam = _uiState.value.availableCameras.firstOrNull { it.isBack != currentIsBack }
-        if (targetCam != null) {
-            switchCamera(targetCam.cameraId)
+        val currentIsFront = _uiState.value.currentLens?.isFront ?: false
+        val targetLens = if (currentIsFront) {
+            _uiState.value.availableLenses.find { !it.isFront && it.label == "1x" }
+                ?: _uiState.value.availableLenses.firstOrNull { !it.isFront }
+        } else {
+            _uiState.value.availableLenses.firstOrNull { it.isFront }
+        }
+
+        if (targetLens != null) {
+            selectLens(targetLens)
         }
     }
 
@@ -202,7 +226,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isManualFocus = s.isManualFocusEnabled,
             evIndex = s.evCompensationIndex,
             whiteBalancePreset = s.whiteBalancePreset,
-            kelvin = s.kelvinTemperature
+            kelvin = s.kelvinTemperature,
+            zoomRatio = s.currentZoomRatio
         )
     }
 

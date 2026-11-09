@@ -11,7 +11,7 @@ data class HistogramData(
 data class HorizonOrientation(
     val pitchDegrees: Float = 0f,
     val rollDegrees: Float = 0f,
-    val isLevel: Boolean = false // within ±1 degree tolerance
+    val isLevel: Boolean = false
 )
 
 data class CameraUiState(
@@ -20,9 +20,12 @@ data class CameraUiState(
     val currentCameraId: String = "0",
     val capabilities: HardwareCapabilities? = null,
 
-    // Multi-Camera selection
-    val availableCameras: List<CameraDeviceInfo> = emptyList(),
-    val currentLensLabel: String = "1x",
+    // Multi-Camera & Optical Lenses
+    val availableLenses: List<LensItem> = emptyList(),
+    val currentLens: LensItem? = null,
+    val currentZoomRatio: Float = 1.0f,
+    val minZoomRatio: Float = 0.6f,
+    val maxZoomRatio: Float = 30.0f,
 
     // Preview Dimensions & Aspect Ratio
     val aspectRatio: AspectRatio = AspectRatio.RATIO_4_3,
@@ -31,14 +34,14 @@ data class CameraUiState(
     // Manual Exposure Controls
     val exposureMode: ExposureMode = ExposureMode.AUTO,
     val iso: Int = 100,
-    val shutterSpeedNanos: Long = 10_000_000L, // 1/100s default
-    val focusDistanceDiopters: Float = 0f,    // 0 = Infinity
+    val shutterSpeedNanos: Long = 10_000_000L,
+    val focusDistanceDiopters: Float = 0f,
     val isManualFocusEnabled: Boolean = false,
     val evCompensationIndex: Int = 0,
     val whiteBalancePreset: WhiteBalancePreset = WhiteBalancePreset.AUTO,
     val kelvinTemperature: Int = 5500,
 
-    // Live Readout from Sensor (actual current frame values calculated by AE)
+    // Live Readout from Sensor
     val actualIso: Int = 100,
     val actualShutterSpeedNanos: Long = 10_000_000L,
 
@@ -57,7 +60,7 @@ data class CameraUiState(
     val histogram: HistogramData = HistogramData(),
     val horizon: HorizonOrientation = HorizonOrientation(),
 
-    // UI Active parameter dial (which wheel is being adjusted)
+    // UI Active parameter dial
     val activeDialParameter: DialParameter? = null
 )
 
