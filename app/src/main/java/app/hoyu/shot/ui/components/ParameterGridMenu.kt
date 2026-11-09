@@ -56,16 +56,12 @@ fun <T> ParameterGridMenu(
         }
     }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
-        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
-        modifier = modifier.padding(16.dp)
+    Box(
+        modifier = modifier
+            .padding(16.dp)
+            .rotate(rotationDegrees),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier.rotate(rotationDegrees),
-            contentAlignment = Alignment.Center
-        ) {
             Column(
                 modifier = Modifier
                     .width(320.dp)
@@ -241,4 +237,3 @@ fun <T> ParameterGridMenu(
             }
         }
     }
-}

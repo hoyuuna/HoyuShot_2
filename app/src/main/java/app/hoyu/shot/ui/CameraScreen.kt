@@ -318,9 +318,14 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // Parameter Menu Popover (Centered popup matching Settings)
-        activeParamMenu?.let { param ->
-            when (param) {
+        // Parameter Menu Popover (Centered popup with scale and fade animations)
+        AnimatedVisibility(
+            visible = activeParamMenu != null,
+            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.88f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            when (activeParamMenu) {
                 DialParameter.SHUTTER -> {
                     val shutterSpeeds = listOf(
                         125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
@@ -340,8 +345,7 @@ fun CameraScreen(
                         formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
                         onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
                         isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
-                        onDismiss = { activeParamMenu = null },
-                        modifier = Modifier.align(Alignment.Center)
+                        onDismiss = { activeParamMenu = null }
                     )
                 }
                 DialParameter.ISO -> {
@@ -359,8 +363,7 @@ fun CameraScreen(
                         formatItem = { "$it" },
                         onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
                         isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
-                        onDismiss = { activeParamMenu = null },
-                        modifier = Modifier.align(Alignment.Center)
+                        onDismiss = { activeParamMenu = null }
                     )
                 }
                 DialParameter.FOCUS -> {
@@ -375,8 +378,7 @@ fun CameraScreen(
                         formatItem = { if (it == 0f) "∞ MACRO" else String.format("%.1fD", it) },
                         onAutoSelected = { viewModel.toggleAutoFocus() },
                         isAutoSelected = !uiState.isManualFocusEnabled,
-                        onDismiss = { activeParamMenu = null },
-                        modifier = Modifier.align(Alignment.Center)
+                        onDismiss = { activeParamMenu = null }
                     )
                 }
                 DialParameter.WHITE_BALANCE -> {
@@ -391,8 +393,7 @@ fun CameraScreen(
                         formatItem = { "${it}K" },
                         onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
                         isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
-                        onDismiss = { activeParamMenu = null },
-                        modifier = Modifier.align(Alignment.Center)
+                        onDismiss = { activeParamMenu = null }
                     )
                 }
                 else -> {}
@@ -439,13 +440,15 @@ fun CameraScreen(
                 180f -> slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
                 270f -> slideOutVertically(targetOffsetY = { it }) + fadeOut()
                 else -> slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
-            }
+            },
+            modifier = Modifier.fillMaxSize()
         ) {
             GalleryViewer(
                 photos = uiState.recentPhotos,
                 rotationDegrees = animatedRotation,
                 onDismiss = { viewModel.closeGallery() },
-                onDeletePhoto = { photo -> viewModel.deletePhoto(photo) }
+                onDeletePhoto = { photo -> viewModel.deletePhoto(photo) },
+                modifier = Modifier.fillMaxSize()
             )
         }
     }
@@ -663,15 +666,25 @@ private fun ViewfinderPreviewContent(
         // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
 
-        // Live Histogram: Strictly at TopStart corner
+        // Live Histogram: Dynamically positioned in user's top-left corner without overlapping UI
         if (uiState.isHistogramVisible) {
+            val histAlignment = when (uiState.uiRotationDegrees) {
+                90f -> Alignment.TopEnd
+                180f -> Alignment.BottomEnd
+                270f -> Alignment.BottomStart
+                else -> Alignment.TopStart
+            }
+            val topPad = if (isOverlayMode) 84.dp else 14.dp
+            val histPadding = when (uiState.uiRotationDegrees) {
+                90f -> Modifier.padding(top = topPad, end = 14.dp)
+                180f -> Modifier.padding(bottom = 14.dp, end = 14.dp)
+                270f -> Modifier.padding(bottom = 14.dp, start = 14.dp)
+                else -> Modifier.padding(top = topPad, start = 14.dp)
+            }
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(
-                        top = if (isOverlayMode) 52.dp else 12.dp,
-                        start = 12.dp
-                    )
+                    .align(histAlignment)
+                    .then(histPadding)
                     .rotate(animatedRotation)
                     .clip(shape)
                     .background(Color(0x77000000))
@@ -685,15 +698,15 @@ private fun ViewfinderPreviewContent(
         // EV Position Alert Badge: In portrait sits above lens switcher; in the other 3 orientations sits close to the bottom edge
         if (uiState.evCompensationIndex != 0) {
             val alertAlignment = when (uiState.uiRotationDegrees) {
-                90f -> Alignment.CenterEnd
+                90f -> Alignment.CenterStart
                 180f -> Alignment.TopCenter
-                270f -> Alignment.CenterStart
+                270f -> Alignment.CenterEnd
                 else -> Alignment.BottomCenter
             }
             val alertPadding = when (uiState.uiRotationDegrees) {
-                90f -> Modifier.padding(end = 12.dp)
+                90f -> Modifier.padding(start = 12.dp)
                 180f -> Modifier.padding(top = 12.dp)
-                270f -> Modifier.padding(start = 12.dp)
+                270f -> Modifier.padding(end = 12.dp)
                 else -> Modifier.padding(bottom = 56.dp)
             }
             Box(

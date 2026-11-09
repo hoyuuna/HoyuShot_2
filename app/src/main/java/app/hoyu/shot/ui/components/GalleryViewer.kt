@@ -7,6 +7,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -42,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.exifinterface.media.ExifInterface
@@ -110,7 +114,7 @@ fun GalleryViewer(
 
         Box(
             modifier = Modifier
-                .size(viewportWidth, viewportHeight)
+                .requiredSize(viewportWidth, viewportHeight)
                 .align(Alignment.Center)
                 .rotate(rotationDegrees)
         ) {
@@ -145,11 +149,21 @@ fun GalleryViewer(
                         .then(if (rotationDegrees == 0f) Modifier.statusBarsPadding() else Modifier)
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    // Top Row: Back button and EXIF Specs
+                    // Top Row: Back button, centered specs, and date/time below specs
+                    val mp = String.format(Locale.US, "%.1f MP", (currentPhoto.width * currentPhoto.height) / 1_000_000f)
+                    val res = "${currentPhoto.width}x${currentPhoto.height}"
+                    val aperture = currentPhoto.aperture.ifEmpty { "f/1.8" }
+                    val isoStr = "ISO ${currentPhoto.iso}"
+                    val shutterStr = currentPhoto.shutterSpeed
+                    val sizeMb = if (currentPhoto.fileSizeBytes > 0) {
+                        String.format(Locale.US, "%.1f MB", currentPhoto.fileSizeBytes / (1024f * 1024f))
+                    } else "3.8 MB"
+                    val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                        .format(Date(currentPhoto.timestamp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
                             onClick = onDismiss,
@@ -163,39 +177,35 @@ fun GalleryViewer(
                             )
                         }
 
-                        // EXIF parameters in ProShot format:
-                        val mp = String.format(Locale.US, "%.1f MP", (currentPhoto.width * currentPhoto.height) / 1_000_000f)
-                        val res = "${currentPhoto.width}x${currentPhoto.height}"
-                        val aperture = currentPhoto.aperture.ifEmpty { "f/1.8" }
-                        val isoStr = "ISO ${currentPhoto.iso}"
-                        val shutterStr = currentPhoto.shutterSpeed
-                        val sizeMb = if (currentPhoto.fileSizeBytes > 0) {
-                            String.format(Locale.US, "%.1f MB", currentPhoto.fileSizeBytes / (1024f * 1024f))
-                        } else "3.8 MB"
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        // Centered column containing parameters and date aligned directly underneath
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            ExifSpecItem(mp)
-                            ExifSpecItem(res)
-                            ExifSpecItem(aperture)
-                            ExifSpecItem(isoStr)
-                            ExifSpecItem(shutterStr)
-                            ExifSpecItem(sizeMb)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ExifSpecItem(mp)
+                                ExifSpecItem(res)
+                                ExifSpecItem(aperture)
+                                ExifSpecItem(isoStr)
+                                ExifSpecItem(shutterStr)
+                                ExifSpecItem(sizeMb)
+                            }
+                            Text(
+                                text = dateStr,
+                                color = Color(0xFF71717A),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
-                    }
 
-                    // Subline: Timestamp date
-                    val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                        .format(Date(currentPhoto.timestamp))
-                    Text(
-                        text = dateStr,
-                        color = Color(0xFF71717A),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(start = 42.dp, top = 2.dp)
-                    )
+                        // Spacer to balance back button so specs are centered
+                        Spacer(modifier = Modifier.size(34.dp))
+                    }
                 }
             }
 
@@ -300,9 +310,6 @@ private fun ZoomablePhotoItem(
     val context = LocalContext.current
     var bitmap by remember(photo.uriString) { mutableStateOf<Bitmap?>(null) }
 
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
     LaunchedEffect(photo.uriString) {
         withContext(Dispatchers.IO) {
             try {
@@ -347,31 +354,55 @@ private fun ZoomablePhotoItem(
         }
     }
 
+    var targetScale by remember { mutableStateOf(1f) }
+    var targetOffset by remember { mutableStateOf(Offset.Zero) }
+
+    val animatedScale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "photoScale"
+    )
+    val animatedOffsetX by animateFloatAsState(
+        targetValue = targetOffset.x,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "photoOffsetX"
+    )
+    val animatedOffsetY by animateFloatAsState(
+        targetValue = targetOffset.y,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "photoOffsetY"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(scale) {
-                // Double tap to zoom in/out
+            .pointerInput(Unit) {
+                // Double tap to zoom in / reset to 1x with smooth spring animation
                 detectTapGestures(
                     onDoubleTap = {
-                        scale = if (scale > 1.2f) 1f else 2.5f
-                        offset = Offset.Zero
+                        if (targetScale > 1.1f) {
+                            targetScale = 1f
+                            targetOffset = Offset.Zero
+                        } else {
+                            targetScale = 2.5f
+                            targetOffset = Offset.Zero
+                        }
                     },
                     onTap = { onToggleChrome() }
                 )
             }
-            .pointerInput(scale) {
+            .pointerInput(targetScale) {
                 // Only intercept drag gestures when zoomed in!
-                // When scale is 1f, do NOT intercept so HorizontalPager swipes freely to older/newer photos!
-                if (scale > 1.05f) {
+                // When at 1x, do NOT intercept so HorizontalPager swipes freely to older/newer photos!
+                if (targetScale > 1.05f) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                        scale = newScale
+                        val newScale = (targetScale * zoom).coerceIn(1f, 5f)
+                        targetScale = newScale
                         val maxPanX = (newScale - 1f) * size.width / 2f
                         val maxPanY = (newScale - 1f) * size.height / 2f
-                        offset = Offset(
-                            (offset.x + pan.x).coerceIn(-maxPanX, maxPanX),
-                            (offset.y + pan.y).coerceIn(-maxPanY, maxPanY)
+                        targetOffset = Offset(
+                            (targetOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
+                            (targetOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
                         )
                     }
                 }
@@ -386,10 +417,10 @@ private fun ZoomablePhotoItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y
+                        scaleX = animatedScale,
+                        scaleY = animatedScale,
+                        translationX = animatedOffsetX,
+                        translationY = animatedOffsetY
                     ),
                 contentScale = ContentScale.Fit
             )
