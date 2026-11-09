@@ -76,6 +76,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Collect device orientation to rotate buttons and icons in-place
         viewModelScope.launch {
             orientationListener.rotationDegrees.collect { deg ->
+                horizonSensor.currentUiRotationDegrees = deg
                 _uiState.update { it.copy(uiRotationDegrees = deg) }
             }
         }
@@ -92,6 +93,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         val initialCameraId = defaultLens?.cameraId ?: "0"
         val caps = inspector.inspectCamera(initialCameraId)
+
+        val initResolutions = computeAvailableResolutions(caps, AspectRatio.RATIO_4_3)
+        val defaultRes = initResolutions.firstOrNull()
+        if (defaultRes != null) {
+            cameraController.targetResolution = Pair(defaultRes.width, defaultRes.height)
+        }
 
         val minZoom = allLenses.filter { !it.isFront }.minOfOrNull { it.zoomRatio } ?: 0.6f
         val maxZoom = 30.0f
@@ -133,6 +140,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 evCompensationIndex = initEv,
                 kelvinTemperature = initKelvin,
                 captureRaw = initRaw,
+                availableResolutions = initResolutions,
+                selectedResolution = defaultRes,
+                selectedMegapixels = defaultRes?.mpLabel ?: "12 MP",
                 isResumeSettingsEnabled = isResume,
                 noiseReductionMode = initNr,
                 sharpnessMode = initSharp
@@ -165,6 +175,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun onTouchFocus(offset: Offset, viewWidth: Int, viewHeight: Int) {
         if (viewWidth <= 0 || viewHeight <= 0) return
 
+        // If user taps on or near the current focus ring, CANCEL focus and return to Continuous AF
+        val existingPoint = _uiState.value.tapFocusPoint
+        if (existingPoint != null) {
+            val dx = offset.x - existingPoint.offset.x
+            val dy = offset.y - existingPoint.offset.y
+            val dist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            if (dist < 110f) {
+                cancelTouchFocus()
+                return
+            }
+        }
+
         val normX = (offset.x / viewWidth).coerceIn(0f, 1f)
         val normY = (offset.y / viewHeight).coerceIn(0f, 1f)
 
@@ -187,6 +209,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 } else current
             }
         }
+    }
+
+    fun cancelTouchFocus() {
+        _uiState.update { it.copy(tapFocusPoint = null, isAfLocked = false) }
+        cameraController.resetAutoFocus()
     }
 
     fun toggleResumeSettings() {
@@ -400,21 +427,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun setMegapixels(mp: String) {
-        val targetSize = when (mp) {
-            "12.6 MP" -> Pair(4096, 3072)
-            "6.2 MP" -> Pair(2880, 2160)
-            "2.8 MP" -> Pair(1920, 1440)
-            else -> null
+    fun setResolution(res: CameraResolution) {
+        _uiState.update {
+            it.copy(
+                selectedResolution = res,
+                selectedMegapixels = res.mpLabel
+            )
         }
-        _uiState.update { it.copy(selectedMegapixels = mp) }
-        cameraController.targetResolution = targetSize
+        cameraController.targetResolution = Pair(res.width, res.height)
 
         val surface = activeSurface
         if (surface != null) {
             cameraController.switchCamera(_uiState.value.currentCameraId, surface, _uiState.value.aspectRatio) { w, h ->
                 _uiState.update { it.copy(previewSize = Pair(w, h)) }
             }
+        }
+    }
+
+    fun setMegapixels(mp: String) {
+        val matching = _uiState.value.availableResolutions.find { it.mpLabel == mp }
+        if (matching != null) {
+            setResolution(matching)
+        } else {
+            _uiState.update { it.copy(selectedMegapixels = mp) }
         }
     }
 
@@ -431,10 +466,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         if (lens.cameraId != currentCamId) {
             val caps = inspector.inspectCamera(lens.cameraId)
+            val resList = computeAvailableResolutions(caps, _uiState.value.aspectRatio)
+            val topRes = resList.firstOrNull()
+            if (topRes != null) {
+                cameraController.targetResolution = Pair(topRes.width, topRes.height)
+            }
             _uiState.update {
                 it.copy(
                     currentCameraId = lens.cameraId,
-                    capabilities = caps
+                    capabilities = caps,
+                    availableResolutions = resList,
+                    selectedResolution = topRes,
+                    selectedMegapixels = topRes?.mpLabel ?: it.selectedMegapixels
                 )
             }
             if (_uiState.value.isResumeSettingsEnabled) {
@@ -470,7 +513,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setAspectRatio(ratio: AspectRatio) {
         val surface = activeSurface ?: return
-        _uiState.update { it.copy(aspectRatio = ratio) }
+        val caps = _uiState.value.capabilities
+        val resList = computeAvailableResolutions(caps, ratio)
+        val topRes = resList.firstOrNull()
+        if (topRes != null) {
+            cameraController.targetResolution = Pair(topRes.width, topRes.height)
+        }
+
+        _uiState.update {
+            it.copy(
+                aspectRatio = ratio,
+                availableResolutions = resList,
+                selectedResolution = topRes,
+                selectedMegapixels = topRes?.mpLabel ?: it.selectedMegapixels
+            )
+        }
 
         val cameraId = _uiState.value.currentCameraId
         cameraController.switchCamera(cameraId, surface, ratio) { width, height ->
@@ -601,6 +658,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             noiseReduction = s.noiseReductionMode,
             sharpness = s.sharpnessMode
         )
+    }
+
+    private fun computeAvailableResolutions(caps: HardwareCapabilities?, ratio: AspectRatio): List<CameraResolution> {
+        if (caps == null) return emptyList()
+        val targetRatio = ratio.widthFactor.toDouble() / ratio.heightFactor.toDouble()
+        val matching = caps.supportedJpegSizes.filter {
+            val r = it.first.toDouble() / it.second.toDouble()
+            Math.abs(r - targetRatio) < 0.08
+        }.sortedByDescending { it.first * it.second }
+
+        val list = mutableListOf<CameraResolution>()
+        val seenMp = mutableSetOf<String>()
+        for (size in matching) {
+            val mp = String.format(java.util.Locale.US, "%.1f MP", (size.first * size.second) / 1_000_000f)
+            if (seenMp.add(mp)) {
+                list.add(CameraResolution(size.first, size.second, mp))
+            }
+            if (list.size >= 4) break
+        }
+        if (list.isEmpty() && matching.isNotEmpty()) {
+            val top = matching.first()
+            val mp = String.format(java.util.Locale.US, "%.1f MP", (top.first * top.second) / 1_000_000f)
+            list.add(CameraResolution(top.first, top.second, mp))
+        }
+        return list
     }
 
     override fun onCleared() {

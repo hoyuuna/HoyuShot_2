@@ -32,11 +32,12 @@ fun HorizonLevelIndicator(
         val centerX = size.width / 2f
         val centerY = size.height / 2f
 
-        val boxWidth = 160f
-        val boxHeight = 84f
-        val tickLen = 8f
-        val strokeW = 1.8f
-        val guideColor = Color(0x55FFFFFF)
+        // Larger size as requested ("cho 2 thằng này to ra")
+        val boxWidth = 260f
+        val boxHeight = 130f
+        val tickLen = 14f
+        val strokeW = 2.2f
+        val guideColor = Color(0x66FFFFFF)
 
         val leftX = centerX - boxWidth / 2f
         val rightX = centerX + boxWidth / 2f
@@ -50,17 +51,18 @@ fun HorizonLevelIndicator(
         drawLine(guideColor, Offset(leftX, bottomY), Offset(leftX + tickLen, bottomY), strokeW)
 
         // Center zero reference marks on brackets
+        val centerMarkLen = tickLen * 1.8f
         drawLine(
             if (orientation.isPitchLevel) Color(0xFF00E676) else guideColor,
             Offset(leftX, centerY),
-            Offset(leftX + tickLen * 1.5f, centerY),
-            if (orientation.isPitchLevel) 2.5f else strokeW
+            Offset(leftX + centerMarkLen, centerY),
+            if (orientation.isPitchLevel) 3f else strokeW
         )
 
-        // Intermediate pitch ruler ticks (+15 deg, -15 deg)
+        // Intermediate pitch ruler ticks (+10 deg, -10 deg)
         val quarterH = boxHeight / 4f
-        drawLine(guideColor, Offset(leftX, centerY - quarterH), Offset(leftX + tickLen * 0.8f, centerY - quarterH), strokeW)
-        drawLine(guideColor, Offset(leftX, centerY + quarterH), Offset(leftX + tickLen * 0.8f, centerY + quarterH), strokeW)
+        drawLine(guideColor, Offset(leftX, centerY - quarterH), Offset(leftX + tickLen * 0.9f, centerY - quarterH), strokeW)
+        drawLine(guideColor, Offset(leftX, centerY + quarterH), Offset(leftX + tickLen * 0.9f, centerY + quarterH), strokeW)
 
         // Right bracket spine, top, bottom corners
         drawLine(guideColor, Offset(rightX, topY), Offset(rightX, bottomY), strokeW)
@@ -71,25 +73,25 @@ fun HorizonLevelIndicator(
         drawLine(
             if (orientation.isPitchLevel) Color(0xFF00E676) else guideColor,
             Offset(rightX, centerY),
-            Offset(rightX - tickLen * 1.5f, centerY),
-            if (orientation.isPitchLevel) 2.5f else strokeW
+            Offset(rightX - centerMarkLen, centerY),
+            if (orientation.isPitchLevel) 3f else strokeW
         )
 
         // Intermediate pitch ruler ticks on right bracket
-        drawLine(guideColor, Offset(rightX, centerY - quarterH), Offset(rightX - tickLen * 0.8f, centerY - quarterH), strokeW)
-        drawLine(guideColor, Offset(rightX, centerY + quarterH), Offset(rightX - tickLen * 0.8f, centerY + quarterH), strokeW)
+        drawLine(guideColor, Offset(rightX, centerY - quarterH), Offset(rightX - tickLen * 0.9f, centerY - quarterH), strokeW)
+        drawLine(guideColor, Offset(rightX, centerY + quarterH), Offset(rightX - tickLen * 0.9f, centerY + quarterH), strokeW)
 
         // 2. Moving Pitch Indicator ticks (Cúi/Ngửa ruler ticks moving inside brackets)
-        // Pitch mapping: +-25 degrees mapped to bracket height
-        val pitchFraction = (orientation.pitchDegrees / 25f).coerceIn(-1f, 1f)
+        // Pitch mapping: +-20 degrees relative to eye level
+        val pitchFraction = (orientation.pitchDegrees / 20f).coerceIn(-1f, 1f)
         val dynamicPitchY = centerY + (pitchFraction * (boxHeight / 2.2f))
 
         // Left bracket moving tick
         drawLine(
             color = pitchColor,
             start = Offset(leftX, dynamicPitchY),
-            end = Offset(leftX + 16f, dynamicPitchY),
-            strokeWidth = 2.4f,
+            end = Offset(leftX + 22f, dynamicPitchY),
+            strokeWidth = 3f,
             cap = StrokeCap.Round
         )
 
@@ -97,8 +99,8 @@ fun HorizonLevelIndicator(
         drawLine(
             color = pitchColor,
             start = Offset(rightX, dynamicPitchY),
-            end = Offset(rightX - 16f, dynamicPitchY),
-            strokeWidth = 2.4f,
+            end = Offset(rightX - 22f, dynamicPitchY),
+            strokeWidth = 3f,
             cap = StrokeCap.Round
         )
 
@@ -106,9 +108,9 @@ fun HorizonLevelIndicator(
         rotate(degrees = -orientation.rollDegrees, pivot = Offset(centerX, centerY)) {
             drawLine(
                 color = rollColor,
-                start = Offset(leftX + 22f, centerY),
-                end = Offset(rightX - 22f, centerY),
-                strokeWidth = 2.5f,
+                start = Offset(leftX + 30f, centerY),
+                end = Offset(rightX - 30f, centerY),
+                strokeWidth = 3f,
                 cap = StrokeCap.Round
             )
         }

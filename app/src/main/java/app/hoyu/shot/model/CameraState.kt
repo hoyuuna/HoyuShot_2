@@ -18,6 +18,12 @@ data class HorizonOrientation(
     val isLevel: Boolean = false
 )
 
+data class CameraResolution(
+    val width: Int,
+    val height: Int,
+    val mpLabel: String
+)
+
 enum class FocusState {
     IDLE,
     FOCUSING,
@@ -77,7 +83,9 @@ data class CameraUiState(
 
     // Capture, Timer & Format options
     val captureFormat: CaptureFormat = CaptureFormat.JPEG,
-    val selectedMegapixels: String = "12.6 MP",
+    val availableResolutions: List<CameraResolution> = emptyList(),
+    val selectedResolution: CameraResolution? = null,
+    val selectedMegapixels: String = "12 MP",
     val captureRaw: Boolean = false,
     val isCapturing: Boolean = false,
     val timerMode: TimerMode = TimerMode.OFF,

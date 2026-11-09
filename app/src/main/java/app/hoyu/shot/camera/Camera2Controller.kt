@@ -322,6 +322,31 @@ class Camera2Controller(
         }
     }
 
+    fun resetAutoFocus() {
+        val session = captureSession ?: return
+        val builder = previewRequestBuilder ?: return
+        try {
+            isAfLocked = false
+            builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, null)
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+            session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    super.onCaptureCompleted(session, request, result)
+                    builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                }
+            }, backgroundHandler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Reset autofocus failed", e)
+        }
+    }
+
     fun setAeLock(locked: Boolean) {
         this.isAeLocked = locked
         applyAllSettingsInternal()
