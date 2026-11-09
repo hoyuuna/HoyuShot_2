@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.ui
+package app.hoyu.shot.ui
 
 import android.app.Application
 import android.view.Surface
@@ -21,6 +21,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val horizonSensor = HorizonSensorManager(application)
     private val inspector = CameraHardwareInspector(application)
+
+    private var activeSurface: Surface? = null
 
     private val cameraController = Camera2Controller(
         context = application,
@@ -51,17 +53,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // Check hardware specs
-        val primaryCaps = inspector.inspectPrimaryBackCamera()
-        if (primaryCaps != null) {
-            _uiState.update {
-                it.copy(
-                    currentCameraId = primaryCaps.cameraId,
-                    capabilities = primaryCaps,
-                    iso = primaryCaps.isoRange?.lower ?: 100,
-                    shutterSpeedNanos = primaryCaps.shutterSpeedRangeNanos?.lower ?: 10_000_000L
-                )
-            }
+        // Discover all cameras (Wide, Ultra-wide, Telephoto, Front)
+        val allCameras = inspector.inspectAllAvailableCameras()
+        val defaultCam = allCameras.firstOrNull { it.isBack } ?: allCameras.firstOrNull()
+
+        _uiState.update {
+            it.copy(
+                availableCameras = allCameras,
+                currentCameraId = defaultCam?.cameraId ?: "0",
+                currentLensLabel = defaultCam?.label ?: "1x",
+                capabilities = defaultCam?.capabilities,
+                iso = defaultCam?.capabilities?.isoRange?.lower ?: 100,
+                shutterSpeedNanos = defaultCam?.capabilities?.shutterSpeedRangeNanos?.lower ?: 10_000_000L
+            )
         }
     }
 
@@ -74,9 +78,59 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startCamera(previewSurface: Surface) {
+        this.activeSurface = previewSurface
         val cameraId = _uiState.value.currentCameraId
-        cameraController.openCamera(cameraId, previewSurface)
+        val ratio = _uiState.value.aspectRatio
+
+        cameraController.openCamera(cameraId, previewSurface, ratio) { width, height ->
+            _uiState.update { it.copy(previewSize = Pair(width, height)) }
+        }
         _uiState.update { it.copy(isCameraReady = true) }
+        applyCurrentSettings()
+    }
+
+    fun switchCamera(newCameraId: String) {
+        val surface = activeSurface ?: return
+        if (newCameraId == _uiState.value.currentCameraId) return
+
+        val camInfo = _uiState.value.availableCameras.find { it.cameraId == newCameraId } ?: return
+        val ratio = _uiState.value.aspectRatio
+
+        _uiState.update {
+            it.copy(
+                currentCameraId = newCameraId,
+                currentLensLabel = camInfo.label,
+                capabilities = camInfo.capabilities,
+                // Adjust ranges if needed
+                iso = it.iso.coerceIn(
+                    camInfo.capabilities.isoRange?.lower ?: 100,
+                    camInfo.capabilities.isoRange?.upper ?: 3200
+                )
+            )
+        }
+
+        cameraController.switchCamera(newCameraId, surface, ratio) { width, height ->
+            _uiState.update { it.copy(previewSize = Pair(width, height)) }
+        }
+        applyCurrentSettings()
+    }
+
+    fun toggleCameraFacing() {
+        val currentIsBack = _uiState.value.capabilities?.isFacingBack ?: true
+        val targetCam = _uiState.value.availableCameras.firstOrNull { it.isBack != currentIsBack }
+        if (targetCam != null) {
+            switchCamera(targetCam.cameraId)
+        }
+    }
+
+    fun setAspectRatio(ratio: AspectRatio) {
+        val surface = activeSurface ?: return
+        _uiState.update { it.copy(aspectRatio = ratio) }
+
+        val cameraId = _uiState.value.currentCameraId
+        cameraController.switchCamera(cameraId, surface, ratio) { width, height ->
+            _uiState.update { it.copy(previewSize = Pair(width, height)) }
+        }
         applyCurrentSettings()
     }
 
@@ -156,6 +210,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
         stopSensors()
         cameraController.closeCamera()
+        cameraController.stopBackgroundThread()
     }
 }
-

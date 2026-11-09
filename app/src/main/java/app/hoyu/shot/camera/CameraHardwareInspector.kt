@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.camera
+package app.hoyu.shot.camera
 
 import android.content.Context
 import android.graphics.ImageFormat
@@ -7,34 +7,95 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.util.Rational
+import app.hoyu.shot.model.CameraDeviceInfo
 import app.hoyu.shot.model.HardwareCapabilities
+import kotlin.math.roundToInt
 
 class CameraHardwareInspector(private val context: Context) {
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-    fun inspectAllCameras(): List<HardwareCapabilities> {
-        val result = mutableListOf<HardwareCapabilities>()
+    fun inspectAllAvailableCameras(): List<CameraDeviceInfo> {
+        val list = mutableListOf<Pair<String, CameraCharacteristics>>()
         try {
-            val cameraIds = cameraManager.cameraIdList
-            for (id in cameraIds) {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                result.add(parseCapabilities(id, chars))
+            for (id in cameraManager.cameraIdList) {
+                try {
+                    val chars = cameraManager.getCameraCharacteristics(id)
+                    list.add(Pair(id, chars))
+                } catch (e: Exception) {
+                    // ignore inaccessible camera
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        val backCameras = list.filter {
+            it.second.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        }
+        val frontCameras = list.filter {
+            it.second.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        }
+
+        // Determine base focal length for back cameras (standard wide ~ 4mm to 6mm)
+        val sortedBack = backCameras.sortedBy { (_, chars) ->
+            chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 5.0f
+        }
+
+        // The base 1x is usually the primary camera (often id "0" or around ~4-6mm)
+        val baseBackFocal = sortedBack.firstOrNull { (_, chars) ->
+            val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 5.0f
+            focal >= 3.5f // standard wide is >= 3.5mm; ultra-wides are < 3.5mm
+        }?.let { (_, chars) ->
+            chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+        } ?: sortedBack.firstOrNull()?.let { (_, chars) ->
+            chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+        } ?: 5.0f
+
+        val result = mutableListOf<CameraDeviceInfo>()
+
+        // Process Back cameras with optical zoom labels
+        for ((id, chars) in sortedBack) {
+            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS) ?: floatArrayOf(5.0f)
+            val primaryFocal = focalLengths.firstOrNull() ?: 5.0f
+            val ratio = primaryFocal / baseBackFocal
+
+            val label = when {
+                ratio < 0.75f -> "0.5x"
+                ratio in 0.85f..1.25f -> "1x"
+                ratio in 1.75f..2.4f -> "2x"
+                ratio in 2.5f..3.5f -> "3x"
+                ratio in 4.5f..5.5f -> "5x"
+                ratio > 5.5f -> "${ratio.roundToInt()}x"
+                else -> String.format("%.1fx", ratio)
+            }
+
+            val caps = parseCapabilities(id, chars)
+            result.add(CameraDeviceInfo(id, CameraCharacteristics.LENS_FACING_BACK, primaryFocal, label, caps))
+        }
+
+        // Process Front cameras
+        frontCameras.forEachIndexed { index, (id, chars) ->
+            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS) ?: floatArrayOf(3.0f)
+            val primaryFocal = focalLengths.firstOrNull() ?: 3.0f
+            val label = if (frontCameras.size > 1) "FRONT ${index + 1}" else "FRONT"
+            val caps = parseCapabilities(id, chars)
+            result.add(CameraDeviceInfo(id, CameraCharacteristics.LENS_FACING_FRONT, primaryFocal, label, caps))
+        }
+
         return result
     }
 
     fun inspectPrimaryBackCamera(): HardwareCapabilities? {
-        val all = inspectAllCameras()
-        return all.firstOrNull { it.isFacingBack } ?: all.firstOrNull()
+        val all = inspectAllAvailableCameras()
+        return all.firstOrNull { it.isBack }?.capabilities ?: all.firstOrNull()?.capabilities
     }
 
     private fun parseCapabilities(id: String, chars: CameraCharacteristics): HardwareCapabilities {
-        val facing = chars.get(CameraCharacteristics.LENS_FACING)
+        val facing = chars.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
         val isBack = facing == CameraCharacteristics.LENS_FACING_BACK
+        val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS) ?: floatArrayOf(5.0f)
 
         val hwLevel = chars.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
             ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY
@@ -85,6 +146,9 @@ class CameraHardwareInspector(private val context: Context) {
         return HardwareCapabilities(
             cameraId = id,
             isFacingBack = isBack,
+            lensFacing = facing,
+            sensorOrientation = sensorOrientation,
+            focalLengths = focalLengths,
             hardwareLevelName = hwLevelName,
             isLevelFullOrHigher = isLevelFullOrHigher,
             supportsManualSensor = supportsManualSensor,
@@ -101,4 +165,3 @@ class CameraHardwareInspector(private val context: Context) {
         )
     }
 }
-

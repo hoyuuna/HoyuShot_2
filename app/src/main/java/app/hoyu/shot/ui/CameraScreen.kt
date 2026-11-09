@@ -1,7 +1,6 @@
-﻿package app.hoyu.shot.ui
+package app.hoyu.shot.ui
 
 import android.view.SurfaceHolder
-import android.view.SurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,18 +12,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.hoyu.shot.model.AspectRatio
 import app.hoyu.shot.model.DialParameter
 import app.hoyu.shot.model.HardwareCapabilities
-import app.hoyu.shot.model.WhiteBalancePreset
-import app.hoyu.shot.ui.components.DialWheelControl
-import app.hoyu.shot.ui.components.HistogramView
-import app.hoyu.shot.ui.components.HorizonLevelIndicator
-import app.hoyu.shot.ui.components.ParameterBar
+import app.hoyu.shot.ui.components.*
 
 @Composable
 fun CameraScreen(
@@ -32,6 +29,7 @@ fun CameraScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var surfaceViewRef by remember { mutableStateOf<AutoFitSurfaceView?>(null) }
 
     DisposableEffect(Unit) {
         viewModel.startSensors()
@@ -41,30 +39,47 @@ fun CameraScreen(
         }
     }
 
+    // Keep aspect ratio synchronized with camera preview dimensions
+    LaunchedEffect(uiState.previewSize, uiState.aspectRatio) {
+        val (camWidth, camHeight) = uiState.previewSize
+        // In portrait mode, display width is camera height, display height is camera width
+        surfaceViewRef?.setAspectRatio(camHeight, camWidth)
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. Camera2 Viewfinder via AndroidView & SurfaceView
-        AndroidView(
+        // 1. Camera2 Viewfinder with AutoFitSurfaceView (Centers preview with NO stretching)
+        Box(
             modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.startCamera(holder.surface)
-                        }
+            contentAlignment = Alignment.Center
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxWidth(),
+                factory = { context ->
+                    AutoFitSurfaceView(context).apply {
+                        surfaceViewRef = this
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                viewModel.startCamera(holder.surface)
+                            }
 
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
 
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.stopCamera()
-                        }
-                    })
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                viewModel.stopCamera()
+                            }
+                        })
+                    }
+                },
+                update = { view ->
+                    val (camWidth, camHeight) = uiState.previewSize
+                    view.setAspectRatio(camHeight, camWidth)
                 }
-            }
-        )
+            )
+        }
 
         // 2. Electronic Horizon Level Overlay
         if (uiState.isHorizonLevelVisible) {
@@ -74,7 +89,7 @@ fun CameraScreen(
             )
         }
 
-        // 3. Top HUD: Hardware Level Tag & Live Histogram
+        // 3. Top HUD: App Tag, Aspect Ratio Switcher & Live Histogram
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -83,11 +98,11 @@ fun CameraScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            // Hardware capability tag
+            // Hardware capability & Active Lens tag
             val caps = uiState.capabilities
             Column {
                 Text(
-                    text = "PROSHOT",
+                    text = "HOYUSHOT",
                     color = Color(0xFFFFD600),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Black,
@@ -95,10 +110,33 @@ fun CameraScreen(
                 )
                 if (caps != null) {
                     Text(
-                        text = "LEVEL: ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW OK" else "NO RAW"}",
+                        text = "${uiState.currentLensLabel} | ${caps.hardwareLevelName} | ${if (caps.supportsRawCapture) "RAW" else "NO RAW"}",
                         color = if (caps.isLevelFullOrHigher) Color(0xFF00E676) else Color(0xFFFF9100),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Aspect Ratio Selector (4:3, 16:9, 1:1)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0x80000000))
+                    .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(AspectRatio.RATIO_4_3, AspectRatio.RATIO_16_9, AspectRatio.RATIO_1_1).forEach { ratio ->
+                    val isSelected = uiState.aspectRatio == ratio
+                    Text(
+                        text = ratio.ratioName,
+                        color = if (isSelected) Color(0xFFFFD600) else Color(0x88FFFFFF),
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .clickable { viewModel.setAspectRatio(ratio) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
             }
@@ -109,7 +147,7 @@ fun CameraScreen(
             }
         }
 
-        // 4. Error banner if any
+        // 4. Error banner
         uiState.errorMessage?.let { error ->
             Box(
                 modifier = Modifier
@@ -130,21 +168,34 @@ fun CameraScreen(
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Lens Switcher (e.g. 0.5x, 1x, 2x, 3x, Front)
+            if (uiState.availableCameras.size > 1) {
+                LensSelector(
+                    cameras = uiState.availableCameras,
+                    currentCameraId = uiState.currentCameraId,
+                    onCameraSelect = { newId -> viewModel.switchCamera(newId) },
+                    onFlipFacing = { viewModel.toggleCameraFacing() },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+
             // Dial Wheel Slider (Appears when user taps ISO / Shutter / Focus / EV / WB)
             when (uiState.activeDialParameter) {
                 DialParameter.ISO -> {
-                    val isoList = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
-                    val selectedIdx = isoList.indexOf(uiState.iso).takeIf { it >= 0 } ?: 3
+                    val minIso = uiState.capabilities?.isoRange?.lower ?: 50
+                    val maxIso = uiState.capabilities?.isoRange?.upper ?: 6400
+                    val fullList = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
+                    val isoList = fullList.filter { it in minIso..maxIso }
+                    val selectedIdx = isoList.indexOf(uiState.iso).takeIf { it >= 0 } ?: (isoList.size / 2)
                     DialWheelControl(
                         title = "ISO Sensitivity",
-                        items = isoList,
-                        selectedIndex = selectedIdx,
+                        items = if (isoList.isNotEmpty()) isoList else fullList,
+                        selectedIndex = selectedIdx.coerceIn(0, (if (isoList.isNotEmpty()) isoList else fullList).size - 1),
                         onItemSelected = { _, value -> viewModel.setIso(value) },
                         formatItem = { "$it" }
                     )
                 }
                 DialParameter.SHUTTER -> {
-                    // Shutter speeds from 1/8000s up to 2 seconds
                     val shutterList = listOf(
                         125_000L,       // 1/8000s
                         250_000L,       // 1/4000s
@@ -172,19 +223,24 @@ fun CameraScreen(
                     )
                 }
                 DialParameter.FOCUS -> {
-                    val focusSteps = (0..50).map { it / 5.0f } // 0.0 to 10.0 Diopters
-                    val selectedIdx = (uiState.focusDistanceDiopters * 5).toInt().coerceIn(0, focusSteps.size - 1)
+                    val maxDiopter = uiState.capabilities?.minFocusDistanceDiopters?.coerceAtLeast(1.0f) ?: 10.0f
+                    val stepCount = 50
+                    val focusSteps = (0..stepCount).map { (it.toFloat() / stepCount) * maxDiopter }
+                    val selectedIdx = ((uiState.focusDistanceDiopters / maxDiopter) * stepCount).toInt().coerceIn(0, focusSteps.size - 1)
                     DialWheelControl(
-                        title = "Manual Focus (Diopters)",
+                        title = "Manual Focus",
                         items = focusSteps,
                         selectedIndex = selectedIdx,
                         onItemSelected = { _, diopter -> viewModel.setFocusDistance(diopter) },
-                        formatItem = { if (it == 0f) "∞ Macro" else String.format("%.1f D", it) }
+                        formatItem = { if (it == 0f) "∞ Infinity" else String.format("%.1f D", it) }
                     )
                 }
                 DialParameter.EV -> {
-                    val evList = (-6..6).toList()
-                    val selectedIdx = (uiState.evCompensationIndex + 6).coerceIn(0, evList.size - 1)
+                    val evRange = uiState.capabilities?.evCompensationRange
+                    val minEv = evRange?.lower ?: -6
+                    val maxEv = evRange?.upper ?: 6
+                    val evList = (minEv..maxEv).toList()
+                    val selectedIdx = evList.indexOf(uiState.evCompensationIndex).takeIf { it >= 0 } ?: (evList.size / 2)
                     DialWheelControl(
                         title = "Exposure Compensation (EV)",
                         items = evList,
@@ -247,4 +303,3 @@ fun CameraScreen(
         }
     }
 }
-

@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.camera
+package app.hoyu.shot.camera
 
 import android.annotation.SuppressLint
 import android.content.ContentValues
@@ -12,14 +12,12 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
-import android.util.Range
 import android.view.Surface
 import app.hoyu.shot.camera.analyzer.HistogramAnalyzer
 import app.hoyu.shot.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -76,16 +74,27 @@ class Camera2Controller(
     }
 
     @SuppressLint("MissingPermission")
-    fun openCamera(cameraId: String, previewSurface: Surface) {
+    fun openCamera(
+        cameraId: String,
+        previewSurface: Surface,
+        targetRatio: AspectRatio,
+        onPreviewSizeCalculated: (width: Int, height: Int) -> Unit
+    ) {
         this.previewSurface = previewSurface
         startBackgroundThread()
 
         try {
             val chars = cameraManager.getCameraCharacteristics(cameraId)
             currentCharacteristics = chars
-            _capabilities.value = hardwareInspector.inspectAllCameras().find { it.cameraId == cameraId }
 
-            setupImageReaders(chars)
+            val caps = hardwareInspector.inspectAllAvailableCameras().find { it.cameraId == cameraId }?.capabilities
+                ?: hardwareInspector.inspectPrimaryBackCamera()
+            _capabilities.value = caps
+
+            val optimalPreviewSize = caps?.findOptimalPreviewSize(targetRatio) ?: Pair(1920, 1080)
+            onPreviewSizeCalculated(optimalPreviewSize.first, optimalPreviewSize.second)
+
+            setupImageReaders(chars, targetRatio)
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -101,7 +110,7 @@ class Camera2Controller(
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     cameraDevice = null
-                    onError("Camera device error code: $error")
+                    onError("Camera error: $error")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -110,10 +119,20 @@ class Camera2Controller(
         }
     }
 
-    private fun setupImageReaders(chars: CameraCharacteristics) {
+    fun switchCamera(
+        newCameraId: String,
+        newSurface: Surface,
+        targetRatio: AspectRatio,
+        onPreviewSizeCalculated: (width: Int, height: Int) -> Unit
+    ) {
+        closeCamera()
+        openCamera(newCameraId, newSurface, targetRatio, onPreviewSizeCalculated)
+    }
+
+    private fun setupImageReaders(chars: CameraCharacteristics, targetRatio: AspectRatio) {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
 
-        // 1. Analysis stream (320x240 YUV for fast histogram)
+        // 1. Fast Analysis stream (YUV for histogram)
         val yuvSizes = map.getOutputSizes(ImageFormat.YUV_420_888)
         val optimalYuv = yuvSizes?.minByOrNull { it.width * it.height } ?: yuvSizes?.firstOrNull()
         if (optimalYuv != null) {
@@ -127,7 +146,7 @@ class Camera2Controller(
                             val hist = histogramAnalyzer.analyze(image)
                             onHistogramReady(hist)
                         } catch (e: Exception) {
-                            // ignore buffer drop
+                            // ignore drop
                         } finally {
                             image.close()
                         }
@@ -136,9 +155,20 @@ class Camera2Controller(
             }
         }
 
-        // 2. Full-Res JPEG stream
-        val jpegSizes = map.getOutputSizes(ImageFormat.JPEG)
-        val largestJpeg = jpegSizes?.maxByOrNull { it.width * it.height }
+        // 2. Full-Res JPEG stream matching aspect ratio
+        val jpegSizes = map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
+        val targetRatioVal = when (targetRatio) {
+            AspectRatio.RATIO_4_3 -> 4.0 / 3.0
+            AspectRatio.RATIO_16_9 -> 16.0 / 9.0
+            AspectRatio.RATIO_1_1 -> 1.0
+            AspectRatio.RATIO_3_2 -> 3.0 / 2.0
+        }
+        val matchingJpeg = jpegSizes.filter {
+            Math.abs((it.width.toDouble() / it.height.toDouble()) - targetRatioVal) < 0.05
+        }
+        val largestJpeg = (if (matchingJpeg.isNotEmpty()) matchingJpeg else jpegSizes.toList())
+            .maxByOrNull { it.width * it.height }
+
         if (largestJpeg != null) {
             jpegImageReader = ImageReader.newInstance(
                 largestJpeg.width, largestJpeg.height, ImageFormat.JPEG, 2
@@ -153,7 +183,7 @@ class Camera2Controller(
             }
         }
 
-        // 3. RAW_SENSOR stream (if supported)
+        // 3. RAW_SENSOR stream
         val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR)
         val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
         if (largestRaw != null) {
@@ -203,7 +233,7 @@ class Camera2Controller(
         try {
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start repeating preview request", e)
+            Log.e(TAG, "Failed to start repeating preview", e)
         }
     }
 
@@ -220,9 +250,6 @@ class Camera2Controller(
         }
     }
 
-    /**
-     * Dynamically updates manual controls on the flying preview session
-     */
     fun updateManualSettings(
         exposureMode: ExposureMode,
         iso: Int,
@@ -243,7 +270,6 @@ class Camera2Controller(
                     builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, evIndex)
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
-                    // Manual shutter, let auto-exposure adjust ISO if possible or manual
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, shutterNanos)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
@@ -260,7 +286,6 @@ class Camera2Controller(
                 }
             }
 
-            // Focus controls
             if (isManualFocus) {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance)
@@ -268,9 +293,7 @@ class Camera2Controller(
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             }
 
-            // White Balance
             applyWhiteBalance(builder, whiteBalancePreset, kelvin)
-
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update camera settings", e)
@@ -283,24 +306,12 @@ class Camera2Controller(
         kelvin: Int
     ) {
         when (preset) {
-            WhiteBalancePreset.AUTO -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-            }
-            WhiteBalancePreset.DAYLIGHT -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
-            }
-            WhiteBalancePreset.CLOUDY -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT)
-            }
-            WhiteBalancePreset.SHADE -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_SHADE)
-            }
-            WhiteBalancePreset.FLUORESCENT -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT)
-            }
-            WhiteBalancePreset.INCANDESCENT -> {
-                builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT)
-            }
+            WhiteBalancePreset.AUTO -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            WhiteBalancePreset.DAYLIGHT -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
+            WhiteBalancePreset.CLOUDY -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT)
+            WhiteBalancePreset.SHADE -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_SHADE)
+            WhiteBalancePreset.FLUORESCENT -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT)
+            WhiteBalancePreset.INCANDESCENT -> builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT)
             WhiteBalancePreset.CUSTOM_KELVIN -> {
                 builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
                 val gains = kelvinToRggbVector(kelvin)
@@ -311,24 +322,17 @@ class Camera2Controller(
     }
 
     private fun kelvinToRggbVector(kelvin: Int): RggbChannelVector {
-        // Temperature to RGB approximation algorithm (Tanner Helland formula)
         val temp = kelvin / 100.0
         val r: Float = if (temp <= 66) 1.0f else (temp - 60).let {
             (1.2929 * Math.pow(it, -0.1332)).toFloat()
         }.coerceIn(0.5f, 2.5f)
-
         val g: Float = 1.0f
-
         val b: Float = if (temp >= 66) 1.0f else if (temp <= 19) 0.0f else (temp - 10).let {
             (0.5432 * Math.log(it) - 0.3025).toFloat()
         }.coerceIn(0.5f, 2.5f)
-
         return RggbChannelVector(r, g, g, b)
     }
 
-    /**
-     * Executes Still Photo Capture (supports dual JPEG + RAW DNG)
-     */
     fun takePicture(captureRaw: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
@@ -346,7 +350,6 @@ class Camera2Controller(
                 captureBuilder.addTarget(rawImageReader!!.surface)
             }
 
-            // Copy settings from current preview request
             previewRequestBuilder?.let { preview ->
                 captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, preview.get(CaptureRequest.CONTROL_AE_MODE))
                 captureBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, preview.get(CaptureRequest.SENSOR_SENSITIVITY))
@@ -404,7 +407,7 @@ class Camera2Controller(
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/ProShot")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
             }
         }
 
@@ -432,7 +435,7 @@ class Camera2Controller(
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/ProShot")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
             }
         }
 
@@ -463,11 +466,8 @@ class Camera2Controller(
 
             rawImageReader?.close()
             rawImageReader = null
-
-            stopBackgroundThread()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing camera", e)
         }
     }
 }
-

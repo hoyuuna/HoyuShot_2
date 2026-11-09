@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.model
+package app.hoyu.shot.model
 
 data class HistogramData(
     val lumaBins: IntArray = IntArray(256),
@@ -20,6 +20,14 @@ data class CameraUiState(
     val currentCameraId: String = "0",
     val capabilities: HardwareCapabilities? = null,
 
+    // Multi-Camera selection
+    val availableCameras: List<CameraDeviceInfo> = emptyList(),
+    val currentLensLabel: String = "1x",
+
+    // Preview Dimensions & Aspect Ratio
+    val aspectRatio: AspectRatio = AspectRatio.RATIO_4_3,
+    val previewSize: Pair<Int, Int> = Pair(1920, 1440),
+
     // Manual Exposure Controls
     val exposureMode: ExposureMode = ExposureMode.AUTO,
     val iso: Int = 100,
@@ -36,7 +44,6 @@ data class CameraUiState(
 
     // Capture & Format options
     val captureRaw: Boolean = false,
-    val aspectRatio: AspectRatio = AspectRatio.RATIO_4_3,
     val isCapturing: Boolean = false,
     val lastCapturedUri: String? = null,
 
@@ -61,4 +68,3 @@ enum class DialParameter {
     EV,
     WHITE_BALANCE
 }
-
