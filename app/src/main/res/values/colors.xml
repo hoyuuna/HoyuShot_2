@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="pro_yellow">#FFFFD600</color>
+    <color name="pro_cyan">#FF00E5FF</color>
+    <color name="pro_green">#FF00E676</color>
+    <color name="pro_red">#FFFF1744</color>
+    <color name="surface_dark">#FF121212</color>
+</resources>
