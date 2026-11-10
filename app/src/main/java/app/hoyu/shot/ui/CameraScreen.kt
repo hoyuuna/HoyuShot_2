@@ -361,7 +361,6 @@ fun CameraScreen(
                         isModeModalVisible = false
                         isSettingsDialogVisible = false
                         isAdvancedSettingsVisible = false
-                        viewModel.dismissUpdateDialog()
                     }
             )
         }
