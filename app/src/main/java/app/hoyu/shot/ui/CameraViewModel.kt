@@ -718,6 +718,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val surface = activeSurface ?: return
         // Add 0.1x (e.g. 5.1x for 5x, 3.3x for 3.2x) to guarantee crossing the Google HAL telephoto threshold
         val targetSimulatedZoom = lens.zoomRatio + 0.1f
+        val isAlreadyOnCam0 = _uiState.value.currentCameraId == "0"
 
         val caps = inspector.inspectCamera("0")
         val resList = computeAvailableResolutions(caps, _uiState.value.aspectRatio)
@@ -737,7 +738,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         cameraController.currentZoomRatio = targetSimulatedZoom
 
-        if (cameraController.currentCameraId != "0") {
+        if (!isAlreadyOnCam0) {
             cameraController.switchCamera("0", surface, _uiState.value.aspectRatio) { width, height ->
                 _uiState.update { it.copy(previewSize = Pair(width, height)) }
             }
