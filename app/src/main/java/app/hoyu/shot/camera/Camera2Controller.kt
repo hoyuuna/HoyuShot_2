@@ -226,13 +226,24 @@ class Camera2Controller(
         }
 
         jpegImageReader = ImageReader.newInstance(
-            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 8
+            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 16
         ).apply {
             setOnImageAvailableListener({ reader ->
-                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                backgroundHandler?.post {
-                    saveJpegImage(image)
+                while (true) {
+                    val image = try {
+                        reader.acquireNextImage()
+                    } catch (e: Exception) {
+                        null
+                    } ?: break
+
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
                     image.close()
+
+                    backgroundHandler?.post {
+                        saveJpegBytes(bytes)
+                    }
                 }
             }, backgroundHandler)
         }
@@ -549,13 +560,25 @@ class Camera2Controller(
         return RggbChannelVector(r, g, g, b)
     }
 
+    private val photoCounter = java.util.concurrent.atomic.AtomicInteger(0)
+
+    fun takeBurstPicture(captureRaw: Boolean) {
+        submitCaptureRequest(captureRaw = captureRaw, isBurst = true)
+    }
+
     fun takePicture(captureRaw: Boolean) {
+        submitCaptureRequest(captureRaw = captureRaw, isBurst = false)
+    }
+
+    private fun submitCaptureRequest(captureRaw: Boolean, isBurst: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
         val chars = currentCharacteristics ?: return
 
-        if (isCapturing) return
-        isCapturing = true
+        if (!isBurst) {
+            if (isCapturing) return
+            isCapturing = true
+        }
 
         try {
             val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -617,10 +640,16 @@ class Camera2Controller(
 
                     if (willCaptureRaw) {
                         rawImageReader?.setOnImageAvailableListener({ reader ->
-                            val rawImage = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                            backgroundHandler?.post {
-                                saveDngImage(rawImage, chars, result)
-                                rawImage.close()
+                            while (true) {
+                                val rawImage = try {
+                                    reader.acquireNextImage()
+                                } catch (e: Exception) {
+                                    null
+                                } ?: break
+                                backgroundHandler?.post {
+                                    saveDngImage(rawImage, chars, result)
+                                    rawImage.close()
+                                }
                             }
                         }, backgroundHandler)
                     }
@@ -646,11 +675,43 @@ class Camera2Controller(
         }
     }
 
-    private fun saveJpegImage(image: android.media.Image) {
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val fileName = "IMG_$timeStamp.jpg"
+    private fun saveJpegBytes(bytes: ByteArray) {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+        val count = photoCounter.incrementAndGet() % 10000
+        val fileName = "IMG_${timeStamp}_${String.format(Locale.US, "%04d", count)}.jpg"
         val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
+        // 1. Write bytes to temporary file on disk so ExifInterface can safely write GPS tags
+        val tempFile = java.io.File(context.cacheDir, "temp_$fileName")
+        var imgWidth = 4000
+        var imgHeight = 3000
+
+        try {
+            tempFile.outputStream().use { fos ->
+                fos.write(bytes)
+            }
+
+            val exif = ExifInterface(tempFile.absolutePath)
+            if (loc != null) {
+                exif.setGpsInfo(loc)
+                val latRef = if (loc.latitude >= 0) "N" else "S"
+                val lonRef = if (loc.longitude >= 0) "E" else "W"
+                exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, latRef)
+                exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, lonRef)
+                exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, loc.provider ?: "GPS")
+            }
+            exif.setAttribute(ExifInterface.TAG_ORIENTATION, lastJpegOrientation.toString())
+            exif.setAttribute(ExifInterface.TAG_MAKE, "Xiaomi")
+            exif.setAttribute(ExifInterface.TAG_MODEL, "Xiaomi 13")
+            exif.saveAttributes()
+
+            imgWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 4000)
+            imgHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 3000)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write EXIF to temp file", e)
+        }
+
+        // 2. Stream byte-complete JPEG (with valid EXIF GPS) directly into MediaStore
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -666,25 +727,16 @@ class Camera2Controller(
         val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         uri?.let { destUri ->
             var writtenBytes = 0L
-            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
-                val buffer = image.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                outputStream.write(bytes)
-                writtenBytes = bytes.size.toLong()
-            }
-
-            // Fallback guarantee: embed GPS EXIF if enabled
-            if (loc != null) {
-                try {
-                    context.contentResolver.openFileDescriptor(destUri, "rw")?.use { pfd ->
-                        val exif = ExifInterface(pfd.fileDescriptor)
-                        exif.setGpsInfo(loc)
-                        exif.saveAttributes()
+            try {
+                context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
+                    tempFile.inputStream().use { inputStream ->
+                        writtenBytes = inputStream.copyTo(outputStream)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to write EXIF GPS", e)
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to copy to MediaStore", e)
+            } finally {
+                tempFile.delete()
             }
 
             val chars = currentCharacteristics
@@ -698,8 +750,8 @@ class Camera2Controller(
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = false,
-                width = if (isPortrait) image.height else image.width,
-                height = if (isPortrait) image.width else image.height,
+                width = if (isPortrait) imgHeight else imgWidth,
+                height = if (isPortrait) imgWidth else imgHeight,
                 iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
                 focalLength = "1x",
@@ -717,8 +769,9 @@ class Camera2Controller(
         characteristics: CameraCharacteristics,
         captureResult: TotalCaptureResult
     ) {
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val fileName = "RAW_$timeStamp.dng"
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+        val count = photoCounter.incrementAndGet() % 10000
+        val fileName = "RAW_${timeStamp}_${String.format(Locale.US, "%04d", count)}.dng"
         val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
         val values = ContentValues().apply {

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import androidx.core.content.ContextCompat
@@ -20,7 +21,7 @@ class LocationHelper(private val context: Context) {
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             val current = cachedLocation
-            if (current == null || !current.hasAccuracy() || (location.hasAccuracy() && location.accuracy <= current.accuracy)) {
+            if (current == null || location.time >= current.time - 5000L) {
                 cachedLocation = location
             }
         }
@@ -41,26 +42,25 @@ class LocationHelper(private val context: Context) {
         if (!hasLocationPermission() || isListening) return
         val lm = locationManager ?: return
         try {
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                lm.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    1500L,
-                    1f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
-            }
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                lm.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    1500L,
-                    3f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
+            // Listen on all active providers (Fused, GPS, Network)
+            val providers = lm.allProviders.filter { it != LocationManager.PASSIVE_PROVIDER }
+            for (provider in providers) {
+                if (lm.isProviderEnabled(provider)) {
+                    try {
+                        lm.requestLocationUpdates(
+                            provider,
+                            1000L,
+                            0f,
+                            locationListener,
+                            Looper.getMainLooper()
+                        )
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
             }
             isListening = true
-            // Prime cache with last known immediately while waiting for fresh fix
+            // Prime cache with freshest known location immediately
             if (cachedLocation == null) {
                 cachedLocation = getLastKnownLocationInternal()
             }
@@ -83,17 +83,21 @@ class LocationHelper(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun getLastKnownLocationInternal(): Location? {
         val lm = locationManager ?: return null
-        val providers = listOf(
-            LocationManager.GPS_PROVIDER,
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        )
         var bestLocation: Location? = null
-        for (provider in providers) {
+
+        val candidateProviders = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateProviders.add(LocationManager.FUSED_PROVIDER)
+        }
+        candidateProviders.add(LocationManager.GPS_PROVIDER)
+        candidateProviders.add(LocationManager.NETWORK_PROVIDER)
+        candidateProviders.add(LocationManager.PASSIVE_PROVIDER)
+
+        for (provider in candidateProviders) {
             try {
                 if (lm.isProviderEnabled(provider)) {
                     val loc = lm.getLastKnownLocation(provider) ?: continue
-                    if (bestLocation == null || (loc.hasAccuracy() && loc.accuracy < (bestLocation.accuracy.takeIf { it > 0 } ?: Float.MAX_VALUE))) {
+                    if (bestLocation == null || loc.time > bestLocation.time) {
                         bestLocation = loc
                     }
                 }
@@ -101,6 +105,20 @@ class LocationHelper(private val context: Context) {
                 // Ignore provider error
             }
         }
+
+        // Check any remaining providers from allProviders
+        for (provider in lm.allProviders) {
+            if (candidateProviders.contains(provider)) continue
+            try {
+                val loc = lm.getLastKnownLocation(provider) ?: continue
+                if (bestLocation == null || loc.time > bestLocation.time) {
+                    bestLocation = loc
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+
         return bestLocation
     }
 
@@ -108,7 +126,9 @@ class LocationHelper(private val context: Context) {
     fun getBestLocation(): Location? {
         if (!hasLocationPermission()) return null
         val loc = cachedLocation ?: getLastKnownLocationInternal()
-        cachedLocation = loc
+        if (loc != null) {
+            cachedLocation = loc
+        }
         return loc
     }
 

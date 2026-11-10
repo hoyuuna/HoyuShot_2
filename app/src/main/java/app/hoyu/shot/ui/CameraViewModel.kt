@@ -685,6 +685,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun takeBurstShot() {
+        _uiState.update { it.copy(isCapturing = true) }
+        cameraController.takeBurstPicture(captureRaw = _uiState.value.captureRaw)
+    }
+
     private fun persistCurrentSettings() {
         val s = _uiState.value
         settingsRepo.savedCameraId = s.currentCameraId

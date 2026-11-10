@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -28,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
@@ -137,130 +139,28 @@ fun CameraScreen(
         val leftoverHeight = maxHeight - previewHeightEstimate
         val isOverlayNeeded = leftoverHeight < 210.dp
 
-        // ==========================================
-        // MAIN VIEWPORT STRUCTURE
-        // ==========================================
-        if (!isOverlayNeeded) {
-            // 4:3 / 1:1 Layout: Clean Column (TopBar -> Preview -> BottomControls in black margin)
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Top Bar in black letterbox
-                TopToolbar(
-                    uiState = uiState,
-                    animatedRotation = animatedRotation,
-                    shape = shape,
-                    onOpenSettings = { isSettingsDialogVisible = true },
-                    onToggleAeLock = { viewModel.toggleAeLock() },
-                    onChangeRatio = {
-                        val next = when (uiState.aspectRatio) {
-                            AspectRatio.RATIO_4_3 -> AspectRatio.RATIO_16_9
-                            AspectRatio.RATIO_16_9 -> AspectRatio.RATIO_1_1
-                            AspectRatio.RATIO_1_1 -> AspectRatio.RATIO_4_3
-                            else -> AspectRatio.RATIO_4_3
-                        }
-                        viewModel.setAspectRatio(next)
-                    },
-                    onToggleGrid = { viewModel.toggleGrid() },
-                    onToggleFormatMenu = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        isFormatMenuVisible = !isFormatMenuVisible
-                    }
-                )
+        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible
+        val popupBlurRadius by animateDpAsState(
+            targetValue = if (isAnyPopupOpen) 20.dp else 0.dp,
+            animationSpec = tween(220),
+            label = "popupBlur"
+        )
 
-                // Viewfinder Preview (Strict aspect ratio)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(previewRatio)
-                ) {
-                    ViewfinderPreviewContent(
-                        uiState = uiState,
-                        animatedRotation = animatedRotation,
-                        shape = shape,
-                        isOverlayMode = false,
-                        onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
-                        onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
-                        onSurfaceDestroyed = { viewModel.stopCamera() },
-                        onSizeChanged = { previewContainerSize = it },
-                        onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
-                        onSwipeToGallery = { viewModel.openGallery() },
-                        onTouchFocus = { offset ->
-                            activeParamMenu = null
-                            isFormatMenuVisible = false
-                            viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
-                        },
-                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
-                        onResetEv = { viewModel.setEvCompensation(0) }
-                    )
-                }
-
-                // Bottom Controls in black margin
+        // ==========================================
+        // MAIN VIEWPORT STRUCTURE (Blurred when popups open)
+        // ==========================================
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (popupBlurRadius > 0.dp) Modifier.blur(popupBlurRadius) else Modifier)
+        ) {
+            if (!isOverlayNeeded) {
+                // 4:3 / 1:1 Layout: Clean Column (TopBar -> Preview -> BottomControls in black margin)
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .navigationBarsPadding(),
-                    verticalArrangement = Arrangement.Center
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    BottomControlsContent(
-                        uiState = uiState,
-                        activeParamMenu = activeParamMenu,
-                        animatedRotation = animatedRotation,
-                        shape = shape,
-                        onParamClick = { param ->
-                            activeParamMenu = if (activeParamMenu == param) null else param
-                        },
-                        onOpenGallery = { viewModel.openGallery() },
-                        onOpenModeModal = { isModeModalVisible = true },
-                        onCapture = { viewModel.takePicture() },
-                        onToggleFlip = { viewModel.toggleCameraFacing() },
-                        onToggleFlash = { viewModel.toggleFlash() },
-                        onEvChanged = { viewModel.setEvCompensation(it) },
-                        onResetEv = { viewModel.setEvCompensation(0) },
-                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
-                    )
-                }
-            }
-        } else {
-            // 16:9 / Full Layout: Preview fills background, Controls dynamically overlay with translucent styling
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Viewfinder Preview as primary layer
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(previewRatio)
-                        .align(Alignment.Center)
-                ) {
-                    ViewfinderPreviewContent(
-                        uiState = uiState,
-                        animatedRotation = animatedRotation,
-                        shape = shape,
-                        isOverlayMode = true,
-                        onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
-                        onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
-                        onSurfaceDestroyed = { viewModel.stopCamera() },
-                        onSizeChanged = { previewContainerSize = it },
-                        onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
-                        onSwipeToGallery = { viewModel.openGallery() },
-                        onTouchFocus = { offset ->
-                            activeParamMenu = null
-                            isFormatMenuVisible = false
-                            viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
-                        },
-                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
-                        onResetEv = { viewModel.setEvCompensation(0) }
-                    )
-                }
-
-                // Top Toolbar (Translucent Overlay)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .background(Color(0x55000000))
-                ) {
+                    // Top Bar in black letterbox
                     TopToolbar(
                         uiState = uiState,
                         animatedRotation = animatedRotation,
@@ -282,33 +182,150 @@ fun CameraScreen(
                             isFormatMenuVisible = !isFormatMenuVisible
                         }
                     )
-                }
 
-                // Bottom Controls (Translucent Glass Overlay)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(Color(0x55000000))
-                        .navigationBarsPadding()
-                ) {
-                    BottomControlsContent(
-                        uiState = uiState,
-                        activeParamMenu = activeParamMenu,
-                        animatedRotation = animatedRotation,
-                        shape = shape,
-                        onParamClick = { param ->
-                            activeParamMenu = if (activeParamMenu == param) null else param
-                        },
-                        onOpenGallery = { viewModel.openGallery() },
-                        onOpenModeModal = { isModeModalVisible = true },
-                        onCapture = { viewModel.takePicture() },
-                        onToggleFlip = { viewModel.toggleCameraFacing() },
-                        onToggleFlash = { viewModel.toggleFlash() },
-                        onEvChanged = { viewModel.setEvCompensation(it) },
-                        onResetEv = { viewModel.setEvCompensation(0) },
-                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
-                    )
+                    // Viewfinder Preview (Strict aspect ratio)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(previewRatio)
+                    ) {
+                        ViewfinderPreviewContent(
+                            uiState = uiState,
+                            animatedRotation = animatedRotation,
+                            shape = shape,
+                            isOverlayMode = false,
+                            onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
+                            onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
+                            onSurfaceDestroyed = { viewModel.stopCamera() },
+                            onSizeChanged = { previewContainerSize = it },
+                            onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                            onSwipeToGallery = { viewModel.openGallery() },
+                            onTouchFocus = { offset ->
+                                activeParamMenu = null
+                                isFormatMenuVisible = false
+                                viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                            },
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetEv = { viewModel.setEvCompensation(0) }
+                        )
+                    }
+
+                    // Bottom Controls in black margin
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        BottomControlsContent(
+                            uiState = uiState,
+                            activeParamMenu = activeParamMenu,
+                            animatedRotation = animatedRotation,
+                            shape = shape,
+                            onParamClick = { param ->
+                                activeParamMenu = if (activeParamMenu == param) null else param
+                            },
+                            onOpenGallery = { viewModel.openGallery() },
+                            onOpenModeModal = { isModeModalVisible = true },
+                            onCapture = { viewModel.takePicture() },
+                            onBurstCapture = { viewModel.takeBurstShot() },
+                            onToggleFlip = { viewModel.toggleCameraFacing() },
+                            onToggleFlash = { viewModel.toggleFlash() },
+                            onEvChanged = { viewModel.setEvCompensation(it) },
+                            onResetEv = { viewModel.setEvCompensation(0) },
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
+                        )
+                    }
+                }
+            } else {
+                // 16:9 / Full Layout: Preview fills background, Controls dynamically overlay with translucent styling
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Viewfinder Preview as primary layer
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(previewRatio)
+                            .align(Alignment.Center)
+                    ) {
+                        ViewfinderPreviewContent(
+                            uiState = uiState,
+                            animatedRotation = animatedRotation,
+                            shape = shape,
+                            isOverlayMode = true,
+                            onSurfaceReady = { view: AutoFitSurfaceView -> surfaceViewRef = view },
+                            onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
+                            onSurfaceDestroyed = { viewModel.stopCamera() },
+                            onSizeChanged = { previewContainerSize = it },
+                            onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                            onSwipeToGallery = { viewModel.openGallery() },
+                            onTouchFocus = { offset ->
+                                activeParamMenu = null
+                                isFormatMenuVisible = false
+                                viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                            },
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetEv = { viewModel.setEvCompensation(0) }
+                        )
+                    }
+
+                    // Top Toolbar (Translucent Overlay)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .background(Color(0x55000000))
+                    ) {
+                        TopToolbar(
+                            uiState = uiState,
+                            animatedRotation = animatedRotation,
+                            shape = shape,
+                            onOpenSettings = { isSettingsDialogVisible = true },
+                            onToggleAeLock = { viewModel.toggleAeLock() },
+                            onChangeRatio = {
+                                val next = when (uiState.aspectRatio) {
+                                    AspectRatio.RATIO_4_3 -> AspectRatio.RATIO_16_9
+                                    AspectRatio.RATIO_16_9 -> AspectRatio.RATIO_1_1
+                                    AspectRatio.RATIO_1_1 -> AspectRatio.RATIO_4_3
+                                    else -> AspectRatio.RATIO_4_3
+                                }
+                                viewModel.setAspectRatio(next)
+                            },
+                            onToggleGrid = { viewModel.toggleGrid() },
+                            onToggleFormatMenu = {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                isFormatMenuVisible = !isFormatMenuVisible
+                            }
+                        )
+                    }
+
+                    // Bottom Controls (Translucent Glass Overlay)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Color(0x55000000))
+                            .navigationBarsPadding()
+                    ) {
+                        BottomControlsContent(
+                            uiState = uiState,
+                            activeParamMenu = activeParamMenu,
+                            animatedRotation = animatedRotation,
+                            shape = shape,
+                            onParamClick = { param ->
+                                activeParamMenu = if (activeParamMenu == param) null else param
+                            },
+                            onOpenGallery = { viewModel.openGallery() },
+                            onOpenModeModal = { isModeModalVisible = true },
+                            onCapture = { viewModel.takePicture() },
+                            onBurstCapture = { viewModel.takeBurstShot() },
+                            onToggleFlip = { viewModel.toggleCameraFacing() },
+                            onToggleFlash = { viewModel.toggleFlash() },
+                            onEvChanged = { viewModel.setEvCompensation(it) },
+                            onResetEv = { viewModel.setEvCompensation(0) },
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
+                        )
+                    }
                 }
             }
         }
@@ -318,10 +335,11 @@ fun CameraScreen(
         // ==========================================
 
         // Outside Tap Scrim Interceptor (Closes active dialog without focusing camera!)
-        if (activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible) {
+        if (isAnyPopupOpen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color(0x66000000))
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
@@ -833,6 +851,7 @@ private fun BottomControlsContent(
     onOpenGallery: () -> Unit,
     onOpenModeModal: () -> Unit,
     onCapture: () -> Unit,
+    onBurstCapture: () -> Unit,
     onToggleFlip: () -> Unit,
     onToggleFlash: () -> Unit,
     onEvChanged: (Int) -> Unit,
@@ -985,8 +1004,8 @@ private fun BottomControlsContent(
                                             while (isHolding) {
                                                 burstCount++
                                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                onCapture()
-                                                val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(120L, 800L)
+                                                onBurstCapture()
+                                                val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(100L, 500L)
                                                 delay(exposureMs)
                                             }
                                         }
