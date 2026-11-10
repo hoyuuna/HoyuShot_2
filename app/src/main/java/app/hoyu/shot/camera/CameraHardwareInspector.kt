@@ -19,10 +19,56 @@ class CameraHardwareInspector(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     /**
-     * Deep probe scanner that uncovers manufacturer-hidden cameras (Xiaomi, Samsung, etc.)
-     * Scans official IDs, physical IDs, and brute-force probes candidate IDs 0..30 and vendor ranges.
+     * Unified Lens Discovery Engine:
+     * - Case A: Full-range Logical Multi-Camera (Google Pixel 6/7/8 Pro, etc.)
+     *   Camera ID "0" already covers ultra-wide through telephoto via CONTROL_ZOOM_RATIO.
+     *   On these devices, physical sub-cameras CANNOT be opened directly; all optical stops map to ID "0"!
+     * - Case B: Discrete OEM Multi-Cameras (Xiaomi 13, Samsung, OnePlus, etc.)
+     *   Each physical sensor (0.6x, 1x, 3.2x) is a discrete standalone camera ID.
+     *   Deduplicates fake auxiliary cameras (e.g. 1x [ID 5], 1x [ID 6]) and low-res depth sensors.
      */
     fun discoverAllLenses(): List<LensItem> {
+        // First inspect Primary Back Camera "0"
+        val primaryChars = try { cameraManager.getCameraCharacteristics("0") } catch (e: Exception) { null }
+        val primaryZoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            primaryChars?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+        } else null
+
+        // Case A: Unified Logical Multi-Camera (Google Pixel 7 Pro, Pixel 6 Pro, etc.)
+        // When Camera "0" covers ultra-wide (<0.85x) through telephoto (>=3.0x),
+        // physical sub-cameras cannot be opened standalone without crashing.
+        // All optical zoom stops operate natively on Camera "0"!
+        if (primaryZoomRange != null && primaryZoomRange.lower < 0.85f && primaryZoomRange.upper >= 3.0f) {
+            Log.d(TAG, "Device uses Unified Logical Multi-Camera on ID 0: range [${primaryZoomRange.lower}, ${primaryZoomRange.upper}]")
+            val logicalLenses = mutableListOf<LensItem>()
+
+            // 1. Ultra-wide optical stop
+            val uwRatio = primaryZoomRange.lower
+            val uwLabel = if (uwRatio <= 0.55f) "0.5x" else "0.6x"
+            logicalLenses.add(LensItem("zoom_$uwLabel", uwLabel, "0", uwRatio, false))
+
+            // 2. Wide optical stop (1x)
+            logicalLenses.add(LensItem("zoom_1x", "1x", "0", 1.0f, false))
+
+            // 3. Optional 2x crop
+            if (primaryZoomRange.upper >= 2.0f) {
+                logicalLenses.add(LensItem("zoom_2x", "2x", "0", 2.0f, false))
+            }
+
+            // 4. Telephoto optical stop (5x or 3x)
+            if (primaryZoomRange.upper >= 5.0f) {
+                logicalLenses.add(LensItem("zoom_5x", "5x", "0", 5.0f, false))
+            } else if (primaryZoomRange.upper >= 3.0f) {
+                logicalLenses.add(LensItem("zoom_3x", "3x", "0", 3.0f, false))
+            }
+
+            // 5. Add Front Camera
+            addFrontCameras(logicalLenses)
+
+            return logicalLenses
+        }
+
+        // Case B: Discrete Physical OEM Cameras (Xiaomi 13, Samsung, etc.)
         val discoveredCameras = mutableMapOf<String, CameraCharacteristics>()
 
         // 1. Official IDs reported by OS
@@ -30,14 +76,16 @@ class CameraHardwareInspector(private val context: Context) {
             for (id in cameraManager.cameraIdList) {
                 try {
                     val chars = cameraManager.getCameraCharacteristics(id)
-                    discoveredCameras[id] = chars
+                    if (isValidCaptureCamera(chars)) {
+                        discoveredCameras[id] = chars
+                    }
                 } catch (e: Exception) {}
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error querying cameraIdList", e)
         }
 
-        // 2. Physical Camera IDs declared under logical multi-cameras
+        // 2. Physical Camera IDs declared under logical multi-cameras (if valid capture cameras)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             for ((_, chars) in discoveredCameras.toList()) {
                 try {
@@ -45,7 +93,9 @@ class CameraHardwareInspector(private val context: Context) {
                         if (!discoveredCameras.containsKey(physId)) {
                             try {
                                 val physChars = cameraManager.getCameraCharacteristics(physId)
-                                discoveredCameras[physId] = physChars
+                                if (isValidCaptureCamera(physChars)) {
+                                    discoveredCameras[physId] = physChars
+                                }
                             } catch (e: Exception) {}
                         }
                     }
@@ -53,31 +103,21 @@ class CameraHardwareInspector(private val context: Context) {
             }
         }
 
-        // 3. Deep Probe: Brute-force query IDs 0..30, 50..70, 100..105
-        // This is how ProShot Evaluator finds hidden lenses on Xiaomi (e.g. ID 4 for 63mm telephoto)
-        val candidateProbeIds = mutableListOf<String>()
-        for (i in 0..30) candidateProbeIds.add(i.toString())
-        for (i in 50..70) candidateProbeIds.add(i.toString())
-        for (i in 100..105) candidateProbeIds.add(i.toString())
-
+        // 3. Deep Probe: Query candidate IDs 0..10 (uncovers Xiaomi physical lenses like ID 4 for 75mm telephoto)
+        val candidateProbeIds = (0..10).map { it.toString() }
         for (candidateId in candidateProbeIds) {
             if (!discoveredCameras.containsKey(candidateId)) {
                 try {
                     val chars = cameraManager.getCameraCharacteristics(candidateId)
-                    // Verify that this camera has a valid preview configuration
-                    val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    val previewSizes = map?.getOutputSizes(SurfaceTexture::class.java)
-                    if (!previewSizes.isNullOrEmpty()) {
+                    if (isValidCaptureCamera(chars)) {
                         discoveredCameras[candidateId] = chars
-                        Log.d(TAG, "Discovered hidden camera ID: $candidateId")
+                        Log.d(TAG, "Discovered valid hidden camera ID: $candidateId")
                     }
-                } catch (e: Exception) {
-                    // ID does not exist on this device, ignore
-                }
+                } catch (e: Exception) {}
             }
         }
 
-        // Now categorize discovered cameras into Back and Front
+        // Categorize into Back and Front
         val backSensors = mutableListOf<SensorInfo>()
         val frontSensors = mutableListOf<SensorInfo>()
 
@@ -96,40 +136,31 @@ class CameraHardwareInspector(private val context: Context) {
             }
         }
 
-        // Sort back sensors by 35mm equivalent focal length
-        backSensors.sortBy { it.focal35mm }
+        // Sort back sensors by 35mm focal length. Prioritize ID "0" as the primary 1x wide.
+        backSensors.sortWith(compareBy({ it.focal35mm }, { if (it.id == "0") 0 else 1 }))
 
-        // Find primary back camera: closest to standard wide ~23-28mm eq (typically ID "0" or around 24mm)
         val primaryBack = backSensors.find { it.id == "0" }
             ?: backSensors.minByOrNull { Math.abs(it.focal35mm - 24.0f) }
             ?: backSensors.firstOrNull()
 
         val primary35mm = primaryBack?.focal35mm ?: 24.0f
-
         val lenses = mutableListOf<LensItem>()
 
-        // Generate clean optical labels for Back cameras
         for (sensor in backSensors) {
             val ratio = sensor.focal35mm / primary35mm
-            var label = when {
-                // Ultra-wide (e.g. 15mm on Xiaomi 13 -> 15/23 = 0.65 -> 0.6x)
+            val label = when {
                 ratio in 0.5f..0.75f -> "0.6x"
                 ratio in 0.4f..0.49f -> "0.5x"
-                // Main wide (23-28mm)
-                ratio in 0.9f..1.15f -> "1x"
-                // 2x Telephoto (~46-52mm)
-                ratio in 1.85f..2.25f -> "2x"
-                // 3.2x Telephoto (63-75mm, like Xiaomi 13 ID 4: 63/23 = 2.74x Leica optical 3.2x)
-                ratio in 2.5f..3.45f -> "3.2x"
-                // 5x Telephoto (~120mm)
-                ratio in 4.5f..5.5f -> "5x"
-                // 10x Periscope (~240mm)
-                ratio in 8.5f..11.0f -> "10x"
+                ratio in 0.85f..1.25f -> "1x"
+                ratio in 1.85f..2.35f -> "2x"
+                ratio in 2.5f..3.6f -> "3.2x"
+                ratio in 4.5f..6.0f -> "5x"
+                ratio in 8.5f..11.5f -> "10x"
                 ratio < 1.0f -> String.format(java.util.Locale.US, "%.1fx", ratio)
                 else -> "${(ratio * 10f).roundToInt() / 10f}x"
             }
 
-            var baseZoomRatio = when (label) {
+            val baseZoomRatio = when (label) {
                 "0.5x" -> 0.5f
                 "0.6x" -> 0.6f
                 "1x" -> 1.0f
@@ -140,65 +171,90 @@ class CameraHardwareInspector(private val context: Context) {
                 else -> (ratio * 10f).roundToInt() / 10f
             }
 
-            // Deduplicate only if identical logical alias; if it's a distinct physical camera, preserve it
-            if (lenses.any { it.label == label }) {
-                val candidateLabel = String.format(java.util.Locale.US, "%.1fx", ratio)
-                if (!lenses.any { it.label == candidateLabel }) {
-                    label = candidateLabel
-                    baseZoomRatio = ratio
-                } else {
-                    label = "$label [ID ${sensor.id}]"
-                }
+            // CRITICAL: Deduplicate! Never add virtual duplicate sensors with the same focal length (e.g. 1x [ID 5], 1x [ID 6])
+            if (lenses.any { it.label == label || Math.abs(it.zoomRatio - baseZoomRatio) < 0.25f }) {
+                Log.d(TAG, "Skipping duplicate rear camera ID ${sensor.id} (label: $label, ratio: $baseZoomRatio)")
+                continue
             }
 
-            if (!lenses.any { it.cameraId == sensor.id }) {
-                lenses.add(
-                    LensItem(
-                        id = "sensor_${sensor.id}_$label",
-                        label = label,
-                        cameraId = sensor.id,
-                        zoomRatio = baseZoomRatio,
-                        isFront = false
-                    )
-                )
-            }
-        }
-
-        // If for any reason telephoto or ultra-wide were not exposed as discrete IDs,
-        // check CONTROL_ZOOM_RATIO_RANGE on primary back camera as fallback!
-        if (primaryBack != null) {
-            val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                primaryBack.chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-            } else null
-
-            if (zoomRange != null) {
-                if (zoomRange.lower < 0.95f && !lenses.any { it.label == "0.6x" || it.label == "0.5x" }) {
-                    val label = String.format("%.1fx", zoomRange.lower)
-                    lenses.add(0, LensItem("zoom_${label}", label, primaryBack.id, zoomRange.lower, false))
-                }
-            }
-        }
-
-        // Add Front Camera(s)
-        frontSensors.forEachIndexed { index, sensor ->
-            val label = if (frontSensors.size > 1) "FRONT ${index + 1}" else "FRONT"
             lenses.add(
                 LensItem(
-                    id = "sensor_${sensor.id}_front",
+                    id = "sensor_${sensor.id}_$label",
                     label = label,
                     cameraId = sensor.id,
-                    zoomRatio = 1.0f,
-                    isFront = true
+                    zoomRatio = baseZoomRatio,
+                    isFront = false
                 )
             )
         }
 
+        // Add front cameras
+        addFrontCameras(lenses, frontSensors)
+
         // Guarantee at least 1x exists
-        if (lenses.isEmpty()) {
-            lenses.add(LensItem("default_1x", "1x", "0", 1.0f, false))
+        if (lenses.none { !it.isFront }) {
+            lenses.add(0, LensItem("default_1x", "1x", "0", 1.0f, false))
         }
 
         return lenses
+    }
+
+    private fun addFrontCameras(
+        targetList: MutableList<LensItem>,
+        discoveredFrontSensors: List<SensorInfo>? = null
+    ) {
+        val sensors = discoveredFrontSensors ?: run {
+            val list = mutableListOf<SensorInfo>()
+            try {
+                for (id in cameraManager.cameraIdList) {
+                    val chars = cameraManager.getCameraCharacteristics(id)
+                    val facing = chars.get(CameraCharacteristics.LENS_FACING)
+                    if (facing == CameraCharacteristics.LENS_FACING_FRONT && isValidCaptureCamera(chars)) {
+                        val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 3.0f
+                        list.add(SensorInfo(id, chars, facing, focal, calculate35mmEquivalent(chars)))
+                    }
+                }
+            } catch (e: Exception) {}
+            list
+        }
+
+        sensors.forEachIndexed { index, sensor ->
+            val label = if (sensors.size > 1) "FRONT ${index + 1}" else "FRONT"
+            if (!targetList.any { it.cameraId == sensor.id }) {
+                targetList.add(
+                    LensItem(
+                        id = "sensor_${sensor.id}_front",
+                        label = label,
+                        cameraId = sensor.id,
+                        zoomRatio = 1.0f,
+                        isFront = true
+                    )
+                )
+            }
+        }
+    }
+
+    private fun isValidCaptureCamera(chars: CameraCharacteristics): Boolean {
+        // 1. Must support standard Camera2 capture (BACKWARD_COMPATIBLE)
+        val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: return false
+        val isBackwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
+        if (!isBackwardCompatible) return false
+
+        // 2. Must support valid preview output and JPEG capture
+        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        val previewSizes = map.getOutputSizes(SurfaceTexture::class.java)
+        val jpegSizes = map.getOutputSizes(ImageFormat.JPEG)
+        if (previewSizes.isNullOrEmpty() || jpegSizes.isNullOrEmpty()) return false
+
+        // 3. Must have photographic resolution (at least 1.5 MP) - filters out TOF/depth/bokeh sensors
+        val maxPixels = jpegSizes.maxOfOrNull { it.width.toLong() * it.height.toLong() } ?: 0L
+        if (maxPixels < 1_500_000L) return false
+
+        // 4. Must report valid focal length
+        val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+        if (focal <= 0f) return false
+
+        return true
     }
 
     private data class SensorInfo(

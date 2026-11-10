@@ -14,6 +14,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -692,37 +694,64 @@ private fun ViewfinderPreviewContent(
             .fillMaxSize()
             .clipToBounds()
             .onSizeChanged { onSizeChanged(it) }
-            .pointerInput(uiState.digitalZoomRatio) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    if (zoom != 1.0f) {
-                        onZoomChanged(zoom)
-                    }
-                }
-            }
+            // 1. Multi-touch isolated gestures: STRICT 2-finger Pinch Zoom vs 1-finger Gallery Swipe
             .pointerInput(uiState.uiRotationDegrees) {
-                var accumulator = 0f
-                detectDragGestures(
-                    onDragStart = { accumulator = 0f },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        // Calculate drag in user's visual frame of reference:
-                        // In ALL orientations, dragging left-to-right from user's perspective triggers gallery!
-                        val userHorizontalDrag = when (uiState.uiRotationDegrees) {
-                            90f -> dragAmount.y // screen top-to-bottom is user's left-to-right
-                            180f -> -dragAmount.x // screen right-to-left is user's left-to-right
-                            270f -> -dragAmount.y // screen bottom-to-top is user's left-to-right
-                            else -> dragAmount.x // screen left-to-right is user's left-to-right
-                        }
-                        accumulator += userHorizontalDrag
-                        if (accumulator > 50f) {
-                            if (uiState.uiHapticsMode == "VIBRATE") {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var isMultiTouch = false
+                    var prevPinchDistance = 0f
+                    var horizontalDragAccumulator = 0f
+                    var totalDragDistance = 0f
+                    var hasTriggeredGallery = false
+
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedPointers = event.changes.filter { it.pressed }
+
+                        if (pressedPointers.size >= 2) {
+                            // Two or more fingers down: STRICTLY PINCH ZOOM, NEVER trigger gallery!
+                            isMultiTouch = true
+                            val p1 = pressedPointers[0].position
+                            val p2 = pressedPointers[1].position
+                            val distance = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
+
+                            if (prevPinchDistance > 0f && distance > 0f) {
+                                val zoomDelta = distance / prevPinchDistance
+                                if (kotlin.math.abs(zoomDelta - 1.0f) > 0.005f) {
+                                    onZoomChanged(zoomDelta)
+                                }
                             }
-                            accumulator = 0f
-                            onSwipeToGallery()
+                            prevPinchDistance = distance
+                            pressedPointers.forEach { it.consume() }
+                        } else if (pressedPointers.size == 1 && !isMultiTouch && !hasTriggeredGallery) {
+                            // Exactly 1 finger, and 2 fingers were NEVER present in this gesture
+                            val change = pressedPointers[0]
+                            val dragAmount = change.position - change.previousPosition
+                            val dragDistance = kotlin.math.hypot(dragAmount.x, dragAmount.y)
+                            totalDragDistance += dragDistance
+
+                            // Only evaluate directional drag after exceeding slight movement slop (> 20px)
+                            if (totalDragDistance > 20f) {
+                                val userHorizontalDrag = when (uiState.uiRotationDegrees) {
+                                    90f -> dragAmount.y
+                                    180f -> -dragAmount.x
+                                    270f -> -dragAmount.y
+                                    else -> dragAmount.x
+                                }
+                                horizontalDragAccumulator += userHorizontalDrag
+
+                                if (horizontalDragAccumulator > 120f) {
+                                    hasTriggeredGallery = true
+                                    if (uiState.uiHapticsMode == "VIBRATE") {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    }
+                                    onSwipeToGallery()
+                                    change.consume()
+                                }
+                            }
                         }
-                    }
-                )
+                    } while (event.changes.any { it.pressed })
+                }
             }
             .pointerInput(Unit) {
                 detectTapGestures(

@@ -297,7 +297,24 @@ class Camera2Controller(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    onError("Failed to configure CameraCaptureSession")
+                    Log.w(TAG, "4-surface capture session failed, attempting fallback preview+jpeg session")
+                    try {
+                        val fallbackSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
+                        previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                            addTarget(pSurface)
+                        }
+                        device.createCaptureSession(fallbackSurfaces, object : CameraCaptureSession.StateCallback() {
+                            override fun onConfigured(fbSession: CameraCaptureSession) {
+                                captureSession = fbSession
+                                applyAllSettingsInternal()
+                            }
+                            override fun onConfigureFailed(s: CameraCaptureSession) {
+                                onError("Failed to configure CameraCaptureSession")
+                            }
+                        }, backgroundHandler)
+                    } catch (e: Exception) {
+                        onError("Failed to configure CameraCaptureSession: ${e.message}")
+                    }
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -953,6 +970,12 @@ class Camera2Controller(
 
     fun closeCamera() {
         try {
+            try {
+                captureSession?.stopRepeating()
+                captureSession?.abortCaptures()
+            } catch (e: Exception) {
+                // Ignore if session already closed or invalid
+            }
             captureSession?.close()
             captureSession = null
 
@@ -967,6 +990,9 @@ class Camera2Controller(
 
             rawImageReader?.close()
             rawImageReader = null
+
+            previewRequestBuilder = null
+            currentCharacteristics = null
         } catch (e: Exception) {
             Log.e(TAG, "Error closing camera", e)
         }

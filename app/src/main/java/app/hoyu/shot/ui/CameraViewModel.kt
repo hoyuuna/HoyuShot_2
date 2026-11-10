@@ -59,6 +59,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         },
         onError = { err ->
             _uiState.update { it.copy(errorMessage = err, isCapturing = false) }
+            // Automatic freeze recovery: If non-default camera failed, immediately fall back to primary camera "0"
+            val currentId = _uiState.value.currentCameraId
+            if (currentId != "0") {
+                viewModelScope.launch {
+                    val fallbackLens = _uiState.value.availableLenses.find { it.cameraId == "0" && !it.isFront }
+                        ?: _uiState.value.availableLenses.firstOrNull { !it.isFront }
+                    if (fallbackLens != null) {
+                        settingsRepo.savedCameraId = "0"
+                        selectLens(fallbackLens)
+                    }
+                }
+            }
         }
     )
 
@@ -906,6 +918,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun applyCurrentSettings() {
         val s = _uiState.value
+        // If this lens is a logical zoom stop on the same camera (like on Pixel or logical zoom_0.5x):
+        // Hardware zoom is lens.zoomRatio * digitalZoomRatio.
+        // If this lens is a discrete physical camera (like ID 4 on Xiaomi 13):
+        // Hardware zoom is strictly digitalZoomRatio (base optical zoom is already 1.0x on that sensor!).
+        val effectiveHardwareZoom = if (s.currentLens?.id?.startsWith("zoom_") == true) {
+            s.currentLens.zoomRatio * s.digitalZoomRatio
+        } else {
+            s.digitalZoomRatio
+        }
+
         cameraController.updateManualSettings(
             exposureMode = s.exposureMode,
             iso = s.iso,
@@ -915,7 +937,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             evIndex = s.evCompensationIndex,
             whiteBalancePreset = s.whiteBalancePreset,
             kelvin = s.kelvinTemperature,
-            zoomRatio = s.currentZoomRatio,
+            zoomRatio = effectiveHardwareZoom,
             flashMode = s.flashMode,
             noiseReduction = s.noiseReductionMode,
             sharpness = s.sharpnessMode
