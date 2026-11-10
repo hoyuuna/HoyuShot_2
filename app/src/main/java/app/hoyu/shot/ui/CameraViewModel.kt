@@ -11,7 +11,6 @@ import app.hoyu.shot.camera.Camera2Controller
 import app.hoyu.shot.camera.CameraHardwareInspector
 import app.hoyu.shot.data.SettingsRepository
 import app.hoyu.shot.model.*
-import app.hoyu.shot.updater.UpdateInfo
 import app.hoyu.shot.sensors.DeviceOrientationListener
 import app.hoyu.shot.sensors.HorizonSensorManager
 import kotlinx.coroutines.Dispatchers
@@ -233,17 +232,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Background auto-check for updates on app boot
         if (settingsRepo.isAutoUpdateCheckEnabled) {
             viewModelScope.launch(Dispatchers.IO) {
-                delay(1200)
+                delay(1500)
                 try {
                     val updateManager = app.hoyu.shot.updater.UpdateManager(application)
                     val result = updateManager.checkForUpdates(includePreRelease = settingsRepo.isPreReleaseUpdateEnabled)
                     if (result is app.hoyu.shot.updater.UpdateCheckResult.UpdateAvailable) {
-                        _uiState.update {
-                            it.copy(
-                                availableUpdateInfo = result.info,
-                                isUpdateDialogVisible = true
-                            )
-                        }
                         updateManager.showUpdateNotification(result.info)
                     }
                 } catch (e: Exception) {
@@ -378,24 +371,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsRepo.isResumeSettingsEnabled = next
         _uiState.update { it.copy(isResumeSettingsEnabled = next) }
         if (next) persistCurrentSettings()
-    }
-
-    fun dismissUpdateDialog() {
-        _uiState.update { it.copy(isUpdateDialogVisible = false) }
-    }
-
-    fun downloadAndInstallUpdate(info: UpdateInfo) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isDownloadingUpdate = true, updateDownloadProgress = 0) }
-            val updateManager = app.hoyu.shot.updater.UpdateManager(getApplication())
-            val file = updateManager.downloadApk(info.downloadUrl, info.tagName) { _, _, percent ->
-                _uiState.update { it.copy(updateDownloadProgress = percent) }
-            }
-            _uiState.update { it.copy(isDownloadingUpdate = false, updateDownloadProgress = null, isUpdateDialogVisible = false) }
-            if (file != null) {
-                updateManager.installApk(file)
-            }
-        }
     }
 
     fun cycleNoiseReduction() {

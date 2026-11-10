@@ -35,8 +35,8 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasCameraPermission = permissions[Manifest.permission.CAMERA] == true
+    ) { _ ->
+        hasCameraPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,23 +66,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (hasCameraPermission != cameraGranted) {
+            hasCameraPermission = cameraGranted
+        }
+    }
+
     private fun checkAndRequestPermissions() {
-        val required = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        hasCameraPermission = cameraGranted
+
+        val toRequest = mutableListOf<String>()
+
+        if (!cameraGranted) {
+            toRequest.add(Manifest.permission.CAMERA)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            toRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+
+        // Only ask notification permission ONCE on the very first launch (Android 13+)
+        // If denied or already asked previously, never ask again so it doesn't disturb the user.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            required.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            required.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            val prefs = getSharedPreferences("hoyushot_prefs", MODE_PRIVATE)
+            val hasAskedNotification = prefs.getBoolean("has_asked_notification_permission", false)
+            if (!hasAskedNotification) {
+                prefs.edit().putBoolean("has_asked_notification_permission", true).apply()
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    toRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
         }
 
-        val allGranted = required.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (allGranted) {
-            hasCameraPermission = true
-        } else {
-            requestPermissionLauncher.launch(required.toTypedArray())
+        if (toRequest.isNotEmpty()) {
+            requestPermissionLauncher.launch(toRequest.toTypedArray())
         }
     }
 

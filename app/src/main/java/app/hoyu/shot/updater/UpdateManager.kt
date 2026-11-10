@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -126,6 +127,9 @@ class UpdateManager(private val context: Context) {
                         return@withContext UpdateCheckResult.LatestVersion(currentVersion)
                     }
                 }
+                if (releases.length() > 0) {
+                    return@withContext UpdateCheckResult.LatestVersion(currentVersion)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "GitHub REST API failed, attempting Atom fallback: ${e.message}")
@@ -178,8 +182,10 @@ class UpdateManager(private val context: Context) {
      */
     fun isNewerVersion(remote: String, local: String): Boolean {
         try {
-            val rParts = remote.split("-")[0].split(".").map { it.toIntOrNull() ?: 0 }
-            val lParts = local.split("-")[0].split(".").map { it.toIntOrNull() ?: 0 }
+            val rClean = remote.trim().removePrefix("v").removePrefix("V").split("-")[0]
+            val lClean = local.trim().removePrefix("v").removePrefix("V").split("-")[0]
+            val rParts = rClean.split(".").map { it.toIntOrNull() ?: 0 }
+            val lParts = lClean.split(".").map { it.toIntOrNull() ?: 0 }
 
             val maxLen = maxOf(rParts.size, lParts.size)
             for (i in 0 until maxLen) {
@@ -291,13 +297,15 @@ class UpdateManager(private val context: Context) {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications for new HoyuShot version updates"
+                enableVibration(true)
+                setShowBadge(true)
             }
             notificationManager.createNotificationChannel(channel)
         }
 
-        val notifyIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("OPEN_UPDATE_DIALOG", true)
+        // Tap notification to immediately download latest APK via browser / system downloader
+        val notifyIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl)).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -307,12 +315,22 @@ class UpdateManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val largeIconBitmap = try {
+            BitmapFactory.decodeResource(context.resources, R.drawable.app_icon)
+        } catch (e: Exception) {
+            null
+        }
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_icon)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .apply {
+                if (largeIconBitmap != null) setLargeIcon(largeIconBitmap)
+            }
             .setContentTitle("HoyuShot ${info.tagName} Available")
-            .setContentText("Tap to download and update to latest version")
+            .setContentText("Tap to download update ${info.tagName}")
             .setStyle(NotificationCompat.BigTextStyle().bigText("Version ${info.tagName} is ready:\n${info.changelog}"))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
 
@@ -320,6 +338,8 @@ class UpdateManager(private val context: Context) {
             notificationManager.notify(1001, builder.build())
         } catch (e: SecurityException) {
             Log.w(TAG, "Missing POST_NOTIFICATIONS permission", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to post notification", e)
         }
     }
 }

@@ -145,7 +145,7 @@ fun CameraScreen(
         val leftoverHeight = maxHeight - previewHeightEstimate
         val isOverlayNeeded = leftoverHeight < 210.dp
 
-        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible || uiState.isUpdateDialogVisible
+        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
 
         // ==========================================
         // MAIN VIEWPORT STRUCTURE (Never blurred!)
@@ -553,131 +553,6 @@ fun CameraScreen(
             onTogglePreReleaseUpdate = { viewModel.togglePreReleaseUpdate() },
             onDismiss = { isAdvancedSettingsVisible = false }
         )
-
-        // Automatic On-Boot Update Available Modal
-        if (uiState.isUpdateDialogVisible && uiState.availableUpdateInfo != null) {
-            val updateInfo = uiState.availableUpdateInfo!!
-            val shape = RoundedCornerShape(2.dp)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) {
-                        viewModel.dismissUpdateDialog()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    modifier = Modifier
-                        .width(320.dp)
-                        .clip(shape)
-                        .background(Color(0xF509090B))
-                        .border(1.dp, Color(0xFFE11D48), shape)
-                        .padding(14.dp)
-                        .clickable(enabled = false) {},
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "SYS // UPDATE AVAILABLE",
-                            color = Color(0xFFFF4D6D),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "[ESC]",
-                            color = Color(0xFFA1A1AA),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier
-                                .clickable { viewModel.dismissUpdateDialog() }
-                                .padding(4.dp)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Version ${updateInfo.tagName} is ready",
-                            color = Color(0xFFFAFAFA),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        if (updateInfo.isPreRelease) {
-                            Text(
-                                text = "[PRE-RELEASE]",
-                                color = Color(0xFFF59E0B),
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-
-                    if (updateInfo.changelog.isNotBlank()) {
-                        Text(
-                            text = updateInfo.changelog.take(240),
-                            color = Color(0xFFA1A1AA),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 4
-                        )
-                    }
-
-                    if (uiState.isDownloadingUpdate) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            LinearProgressIndicator(
-                                progress = { (uiState.updateDownloadProgress ?: 0) / 100f },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp),
-                                color = Color(0xFFE11D48),
-                                trackColor = Color(0xFF27272A)
-                            )
-                            Text(
-                                text = "DOWNLOADING... ${uiState.updateDownloadProgress ?: 0}%",
-                                color = Color(0xFFA1A1AA),
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.downloadAndInstallUpdate(updateInfo) },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
-                                shape = shape
-                            ) {
-                                Text("UPDATE NOW", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                            }
-                            Button(
-                                onClick = { viewModel.dismissUpdateDialog() },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                                shape = shape
-                            ) {
-                                Text("LATER", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // ProShot-style Gallery Viewer (Animated with swipe direction)
         AnimatedVisibility(
