@@ -294,6 +294,10 @@ class CameraHardwareInspector(private val context: Context) {
             Pair(it.width, it.height)
         } ?: emptyList()
 
+        val zoomRatioRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+        } else null
+
         return HardwareCapabilities(
             cameraId = id,
             isFacingBack = isBack,
@@ -312,7 +316,8 @@ class CameraHardwareInspector(private val context: Context) {
             evCompensationStep = evStep,
             supportedPreviewSizes = previewSizes,
             supportedJpegSizes = jpegSizes,
-            supportedRawSizes = rawSizes
+            supportedRawSizes = rawSizes,
+            zoomRatioRange = zoomRatioRange
         )
     }
 }

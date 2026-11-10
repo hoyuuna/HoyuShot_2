@@ -211,10 +211,10 @@ fun AdvancedSettingsDialog(
                     onToggle = onToggleMirrorSelfie
                 )
 
-                // Telephoto Zoom Fallback (Pixel / Aux vendor lock bypass)
+                // Aux Lens Zoom Fallback (Ultrawide 0.6x & Telephoto HAL bypass)
                 SettingsToggleRow(
-                    title = "TELEPHOTO ZOOM FALLBACK",
-                    subtitle = if (uiState.isTeleZoomFallbackEnabled) "Pixel/Aux HAL bypass: simulates tele lens via primary camera zoom (e.g. 5.1x)" else "Standard physical sensor switch (reverts to 1x if blocked by HAL)",
+                    title = "AUX LENS ZOOM FALLBACK (ALL CAMERAS)",
+                    subtitle = if (uiState.isTeleZoomFallbackEnabled) "Last resort bypass: if any aux sensor (0.6x ultrawide, 2x, 3.2x, 5x) is locked by HAL, simulates it via primary camera zoom" else "Standard physical sensor switch (reverts to 1x without zoom if blocked by HAL)",
                     isActive = uiState.isTeleZoomFallbackEnabled,
                     onToggle = onToggleTeleZoomFallback
                 )

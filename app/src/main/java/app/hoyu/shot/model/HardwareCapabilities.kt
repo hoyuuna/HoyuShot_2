@@ -21,7 +21,8 @@ data class HardwareCapabilities(
     val evCompensationStep: Rational,
     val supportedPreviewSizes: List<Pair<Int, Int>>,
     val supportedJpegSizes: List<Pair<Int, Int>>,
-    val supportedRawSizes: List<Pair<Int, Int>>
+    val supportedRawSizes: List<Pair<Int, Int>>,
+    val zoomRatioRange: Range<Float>? = null
 ) {
     val supportsManualFocus: Boolean
         get() = minFocusDistanceDiopters > 0f

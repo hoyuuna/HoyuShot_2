@@ -81,8 +81,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (fallbackLens != null) {
                         settingsRepo.savedCameraId = "0"
                         val attempted = lastAttemptedLens
-                        if (settingsRepo.isTeleZoomFallbackEnabled && attempted != null && attempted.zoomRatio > 1.5f) {
-                            activateSimulatedTelephoto(attempted)
+                        if (attempted != null && canUseZoomFallback(attempted)) {
+                            activateSimulatedLens(attempted)
                         } else {
                             selectLens(fallbackLens)
                         }
@@ -651,9 +651,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val currentCamId = _uiState.value.currentCameraId
         lastAttemptedLens = lens
 
-        // If this telephoto physical camera previously failed on this device, directly use the simulated telephoto fallback
-        if (failedPhysicalCameraIds.contains(lens.cameraId) && settingsRepo.isTeleZoomFallbackEnabled && lens.zoomRatio > 1.5f) {
-            activateSimulatedTelephoto(lens)
+        // If this physical camera previously failed on this device, directly use the simulated fallback as last resort
+        if (failedPhysicalCameraIds.contains(lens.cameraId) && canUseZoomFallback(lens)) {
+            activateSimulatedLens(lens)
             return
         }
 
@@ -714,10 +714,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applyCurrentSettings()
     }
 
-    private fun activateSimulatedTelephoto(lens: LensItem) {
+    private fun canUseZoomFallback(lens: LensItem): Boolean {
+        if (!settingsRepo.isTeleZoomFallbackEnabled) return false
+        if (lens.isFront) return false
+        if (lens.cameraId == "0") return false
+
+        // For tele / standard / sensor crop lenses (zoom >= 1.0f):
+        if (lens.zoomRatio >= 1.0f) return true
+
+        // For ultrawide lenses (zoom < 1.0f, like 0.5x or 0.6x):
+        // Camera "0" MUST support zooming out (e.g. Pixel logical camera with lower zoom range <= lens.zoomRatio + 0.05f)
+        val cam0Caps = inspector.inspectCamera("0")
+        val lowerBound = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            cam0Caps?.zoomRatioRange?.lower ?: 1.0f
+        } else {
+            1.0f
+        }
+        return lowerBound <= (lens.zoomRatio + 0.05f)
+    }
+
+    private fun activateSimulatedLens(lens: LensItem) {
         val surface = activeSurface ?: return
-        // Add 0.1x (e.g. 5.1x for 5x, 3.3x for 3.2x) to guarantee crossing the Google HAL telephoto threshold
-        val targetSimulatedZoom = lens.zoomRatio + 0.1f
+        // If tele (> 1.5x), add 0.1x (e.g. 5.1x for 5x, 3.3x for 3.2x) to guarantee crossing the Google HAL telephoto threshold
+        // If ultrawide (< 1.0x, e.g. 0.6x or 0.5x) or 1x..1.5x, use exact lens.zoomRatio
+        val targetSimulatedZoom = if (lens.zoomRatio > 1.5f) {
+            lens.zoomRatio + 0.1f
+        } else {
+            lens.zoomRatio
+        }
         val isAlreadyOnCam0 = _uiState.value.currentCameraId == "0"
 
         val caps = inspector.inspectCamera("0")
@@ -751,8 +775,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val newDigital = (currentDigital * zoomMultiplier).coerceIn(1.0f, 10.0f)
         val baseZoom = _uiState.value.simulatedTeleBaseZoom
         _uiState.update { it.copy(digitalZoomRatio = newDigital) }
+        val minHwZoom = if (baseZoom < 1.0f) baseZoom else 1.0f
         val maxHwZoom = _uiState.value.maxZoomRatio
-        cameraController.currentZoomRatio = (baseZoom * newDigital).coerceIn(1.0f, maxHwZoom)
+        cameraController.currentZoomRatio = (baseZoom * newDigital).coerceIn(minHwZoom, maxHwZoom)
         applyCurrentSettings()
     }
 
@@ -768,8 +793,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val newDigital = (currentDigital * factor).coerceIn(1.0f, 10.0f)
         val baseZoom = _uiState.value.simulatedTeleBaseZoom
         _uiState.update { it.copy(digitalZoomRatio = newDigital) }
+        val minHwZoom = if (baseZoom < 1.0f) baseZoom else 1.0f
         val maxHwZoom = _uiState.value.maxZoomRatio
-        cameraController.currentZoomRatio = (baseZoom * newDigital).coerceIn(1.0f, maxHwZoom)
+        cameraController.currentZoomRatio = (baseZoom * newDigital).coerceIn(minHwZoom, maxHwZoom)
         applyCurrentSettings()
     }
 
@@ -1091,12 +1117,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Hardware zoom is strictly digitalZoomRatio (base optical zoom is already 1.0x on that sensor!).
         val rawZoom = if (s.currentLens?.id?.startsWith("zoom_") == true) {
             s.currentLens.zoomRatio * s.digitalZoomRatio
-        } else if (s.simulatedTeleBaseZoom > 1.0f) {
+        } else if (s.simulatedTeleBaseZoom != 1.0f) {
             s.simulatedTeleBaseZoom * s.digitalZoomRatio
         } else {
             s.digitalZoomRatio
         }
-        val effectiveHardwareZoom = rawZoom.coerceIn(1.0f, s.maxZoomRatio)
+        val minHwZoom = if (s.simulatedTeleBaseZoom < 1.0f) s.simulatedTeleBaseZoom else 1.0f
+        val effectiveHardwareZoom = rawZoom.coerceIn(minHwZoom, s.maxZoomRatio)
 
         cameraController.updateManualSettings(
             exposureMode = s.exposureMode,
