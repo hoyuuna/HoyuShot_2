@@ -352,7 +352,6 @@ fun CameraScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0x66000000))
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }

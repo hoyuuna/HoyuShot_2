@@ -79,7 +79,7 @@ A professional manual DSLR camera application for Android, built natively with *
 Download the latest release APK from the GitHub Releases page:
 
 - **Latest Release:** [HoyuShot Releases](https://github.com/hoyuuna/HoyuShot_2/releases)
-- **Direct Download (v0.0.34):** [HoyuShot-v0.0.34.apk](https://github.com/hoyuuna/HoyuShot_2/releases/download/v0.0.34/HoyuShot-v0.0.34.apk)
+- **Direct Download (v0.0.35):** [HoyuShot-v0.0.35.apk](https://github.com/hoyuuna/HoyuShot_2/releases/download/v0.0.35/HoyuShot-v0.0.35.apk)
 
 ---
 
