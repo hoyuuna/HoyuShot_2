@@ -10,16 +10,27 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.FocusState
 import app.hoyu.shot.model.TapFocusPoint
 import kotlinx.coroutines.delay
@@ -199,18 +210,18 @@ fun SpotAeRingOverlay(
             // Monospace "AE" Text badge in the center
             Box(
                 modifier = Modifier
-                    .androidx.compose.ui.draw.rotate(rotationDegrees)
-                    .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
-                    .androidx.compose.foundation.background(Color(0xBB000000))
-                    .androidx.compose.foundation.border(1.dp, Color(0xFFE11D48), androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
-                    .androidx.compose.foundation.layout.padding(horizontal = 6.dp, vertical = 2.dp)
+                    .rotate(rotationDegrees)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xBB000000))
+                    .border(1.dp, Color(0xFFE11D48), RoundedCornerShape(2.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                androidx.compose.material3.Text(
+                Text(
                     text = "AE",
                     color = Color(0xFFFAFAFA),
                     fontSize = 10.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Black,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.sp
                 )
             }
