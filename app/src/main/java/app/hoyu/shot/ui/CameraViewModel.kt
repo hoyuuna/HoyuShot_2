@@ -72,7 +72,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         },
         onError = { err ->
-            _uiState.update { it.copy(errorMessage = err, isCapturing = false) }
+            _uiState.update { it.copy(errorMessage = err, isCapturing = false, isLongExposing = false) }
             val currentId = _uiState.value.currentCameraId
             if (currentId != "0") {
                 failedPhysicalCameraIds.add(currentId)
@@ -99,6 +99,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.onExposureCompleted = {
             viewModelScope.launch {
                 _uiState.update { it.copy(isCapturing = false) }
+            }
+        }
+
+        cameraController.onLongExposureStateChanged = { isLong ->
+            viewModelScope.launch {
+                _uiState.update { it.copy(isLongExposing = isLong) }
             }
         }
 

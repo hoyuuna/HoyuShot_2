@@ -95,6 +95,7 @@ data class CameraUiState(
     val selectedMegapixels: String = "12 MP",
     val captureRaw: Boolean = false,
     val isCapturing: Boolean = false,
+    val isLongExposing: Boolean = false,
     val timerMode: TimerMode = TimerMode.OFF,
     val timerCountdownSeconds: Int? = null,
     val flashMode: FlashMode = FlashMode.OFF,
@@ -136,7 +137,7 @@ data class CameraUiState(
     val minShutterLimitNanos: Long? = null,
     val maxIsoLimit: Int? = null,
 
-    // White border shutter blink trigger & simulated telephoto base zoom
+    // Shutter curtain animation trigger & simulated telephoto base zoom
     val shutterBlinkTrigger: Long = 0L,
     val simulatedTeleBaseZoom: Float = 1.0f,
 

@@ -10,7 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -740,14 +741,18 @@ private fun ViewfinderPreviewContent(
     onResetEv: () -> Unit
 ) {
     val view = LocalView.current
-    val blinkAlpha = remember { Animatable(0f) }
+    val shutterCurtainAlpha = remember { Animatable(0f) }
 
     LaunchedEffect(uiState.shutterBlinkTrigger) {
         if (uiState.shutterBlinkTrigger > 0L) {
-            blinkAlpha.snapTo(1f)
-            blinkAlpha.animateTo(
+            shutterCurtainAlpha.snapTo(0f)
+            shutterCurtainAlpha.animateTo(
+                targetValue = 0.92f,
+                animationSpec = tween(durationMillis = 25, easing = FastOutSlowInEasing)
+            )
+            shutterCurtainAlpha.animateTo(
                 targetValue = 0f,
-                animationSpec = tween(durationMillis = 80, easing = LinearEasing)
+                animationSpec = tween(durationMillis = 35, easing = FastOutSlowInEasing)
             )
         }
     }
@@ -993,15 +998,12 @@ private fun ViewfinderPreviewContent(
             }
         }
 
-        // White border shutter blink animation on exposure (Leica / mirrorless viewfinder pulse)
-        if (blinkAlpha.value > 0f) {
+        // Mechanical shutter curtain blackout animation (~60ms total)
+        if (shutterCurtainAlpha.value > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .border(
-                        width = 3.5.dp,
-                        color = Color.White.copy(alpha = blinkAlpha.value)
-                    )
+                    .background(Color.Black.copy(alpha = shutterCurtainAlpha.value))
             )
         }
     }
@@ -1169,12 +1171,13 @@ private fun BottomControlsContent(
                         .border(3.dp, Color(0xFFE11D48), CircleShape)
                         .padding(5.dp)
                         .background(
-                            if (uiState.isCapturing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
+                            if (uiState.isCapturing || uiState.isLongExposing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
                             CircleShape
                         )
-                        .pointerInput(Unit) {
+                        .pointerInput(uiState.isLongExposing) {
                             detectTapGestures(
                                 onPress = {
+                                    if (uiState.isLongExposing) return@detectTapGestures
                                     var isHolding = true
                                     val startTime = System.currentTimeMillis()
                                     var burstJob: Job? = null
@@ -1210,16 +1213,24 @@ private fun BottomControlsContent(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    val dotScale by animateFloatAsState(
-                        targetValue = if (uiState.isCapturing) 1.5f else 1.0f,
-                        animationSpec = tween(durationMillis = 80),
-                        label = "dotScale"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size((8 * dotScale).dp)
-                            .background(Color(0xFFE11D48), CircleShape)
-                    )
+                    if (uiState.isLongExposing) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFE11D48),
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    } else {
+                        val dotScale by animateFloatAsState(
+                            targetValue = if (uiState.isCapturing) 1.5f else 1.0f,
+                            animationSpec = tween(durationMillis = 80),
+                            label = "dotScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size((8 * dotScale).dp)
+                                .background(Color(0xFFE11D48), CircleShape)
+                        )
+                    }
                 }
             }
 

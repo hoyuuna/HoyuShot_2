@@ -29,6 +29,7 @@ import app.hoyu.shot.sensors.LocationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
@@ -75,6 +76,7 @@ class Camera2Controller(
             }
         }
     var onExposureCompleted: (() -> Unit)? = null
+    var onLongExposureStateChanged: ((Boolean) -> Unit)? = null
     var isRawCaptureEnabled: Boolean = false
         set(value) {
             if (field != value) {
@@ -930,6 +932,16 @@ class Camera2Controller(
                 }
             }
 
+            val effectiveExposureNanos = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+                captureBuilder.get(CaptureRequest.SENSOR_EXPOSURE_TIME) ?: currentShutterNanos
+            } else {
+                lastMeasuredShutter
+            }
+            val isLongExposure = !isBurst && effectiveExposureNanos >= 350_000_000L
+            if (isLongExposure) {
+                onLongExposureStateChanged?.invoke(true)
+            }
+
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
                     session: CameraCaptureSession,
@@ -938,9 +950,11 @@ class Camera2Controller(
                     frameNumber: Long
                 ) {
                     super.onCaptureStarted(session, request, timestamp, frameNumber)
-                    // Release capture lock immediately as exposure begins: zero shutter lag for rapid shooting
-                    isCapturing = false
-                    onExposureCompleted?.invoke()
+                    if (!isLongExposure) {
+                        // Release capture lock immediately as short exposure begins: zero shutter lag for rapid shooting
+                        isCapturing = false
+                        onExposureCompleted?.invoke()
+                    }
                 }
 
                 override fun onCaptureCompleted(
@@ -967,6 +981,9 @@ class Camera2Controller(
                     }
 
                     isCapturing = false
+                    if (isLongExposure) {
+                        onLongExposureStateChanged?.invoke(false)
+                    }
                     onExposureCompleted?.invoke()
                 }
 
@@ -977,11 +994,17 @@ class Camera2Controller(
                 ) {
                     super.onCaptureFailed(session, request, failure)
                     isCapturing = false
+                    if (isLongExposure) {
+                        onLongExposureStateChanged?.invoke(false)
+                    }
+                    onExposureCompleted?.invoke()
                     onError("Capture failed: reason ${failure.reason}")
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
             isCapturing = false
+            onLongExposureStateChanged?.invoke(false)
+            onExposureCompleted?.invoke()
             Log.e(TAG, "Failed to capture picture", e)
             onError("Capture error: ${e.message}")
         }
@@ -1008,6 +1031,20 @@ class Camera2Controller(
         }
     }
 
+    private fun degreesToExifOrientation(degrees: Int): Int = when (((degrees % 360) + 360) % 360) {
+        90 -> ExifInterface.ORIENTATION_ROTATE_90
+        180 -> ExifInterface.ORIENTATION_ROTATE_180
+        270 -> ExifInterface.ORIENTATION_ROTATE_270
+        else -> ExifInterface.ORIENTATION_NORMAL
+    }
+
+    private fun exifOrientationToDegrees(exifOrientation: Int): Float = when (exifOrientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+        else -> 0f
+    }
+
     private fun saveJpegBytes(bytes: ByteArray) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val count = photoCounter.incrementAndGet() % 10000
@@ -1015,16 +1052,38 @@ class Camera2Controller(
         val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
         val isFrontCam = currentCharacteristics?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        var wasReencodedUpright = false
         val finalBytes = if (isFrontCam && isMirrorSelfie) {
             try {
+                val rawExifOrientation = try {
+                    ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_UNDEFINED
+                    )
+                } catch (e: Exception) {
+                    ExifInterface.ORIENTATION_UNDEFINED
+                }
                 val origBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 if (origBitmap != null) {
-                    val matrix = Matrix().apply { postScale(-1f, 1f) }
+                    val rotDeg = when {
+                        rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                            rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_180 ||
+                            rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_270 -> exifOrientationToDegrees(rawExifOrientation)
+                        (rawExifOrientation == ExifInterface.ORIENTATION_UNDEFINED || rawExifOrientation == ExifInterface.ORIENTATION_NORMAL) &&
+                            (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
+                            origBitmap.width > origBitmap.height -> lastJpegOrientation.toFloat()
+                        else -> 0f
+                    }
+                    val matrix = Matrix().apply {
+                        if (rotDeg != 0f) postRotate(rotDeg)
+                        postScale(-1f, 1f)
+                    }
                     val mirrored = Bitmap.createBitmap(origBitmap, 0, 0, origBitmap.width, origBitmap.height, matrix, true)
                     val baos = ByteArrayOutputStream()
                     mirrored.compress(Bitmap.CompressFormat.JPEG, jpegQuality, baos)
                     origBitmap.recycle()
-                    mirrored.recycle()
+                    if (mirrored != origBitmap) mirrored.recycle()
+                    wasReencodedUpright = true
                     baos.toByteArray()
                 } else bytes
             } catch (e: Exception) {
@@ -1035,17 +1094,38 @@ class Camera2Controller(
             bytes
         }
 
-        // 1. Write bytes to temporary file on disk so ExifInterface can safely write GPS tags
+        // 1. Write bytes to temporary file on disk so ExifInterface can safely write GPS & EXIF tags
         val tempFile = java.io.File(context.cacheDir, "temp_$fileName")
         var imgWidth = 4000
         var imgHeight = 3000
+        var finalExifOrientation = ExifInterface.ORIENTATION_NORMAL
 
         try {
             tempFile.outputStream().use { fos ->
                 fos.write(finalBytes)
             }
 
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempFile.absolutePath, boundsOpts)
+            if (boundsOpts.outWidth > 0 && boundsOpts.outHeight > 0) {
+                imgWidth = boundsOpts.outWidth
+                imgHeight = boundsOpts.outHeight
+            }
+
             val exif = ExifInterface(tempFile.absolutePath)
+            val halOrientation = exif.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_UNDEFINED
+            )
+            finalExifOrientation = when {
+                wasReencodedUpright -> ExifInterface.ORIENTATION_NORMAL
+                halOrientation == ExifInterface.ORIENTATION_UNDEFINED -> degreesToExifOrientation(lastJpegOrientation)
+                halOrientation == ExifInterface.ORIENTATION_NORMAL &&
+                    (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
+                    imgWidth > imgHeight -> degreesToExifOrientation(lastJpegOrientation)
+                else -> halOrientation
+            }
+
             if (loc != null) {
                 exif.setGpsInfo(loc)
                 val latRef = if (loc.latitude >= 0) "N" else "S"
@@ -1054,13 +1134,15 @@ class Camera2Controller(
                 exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, lonRef)
                 exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, loc.provider ?: "GPS")
             }
-            exif.setAttribute(ExifInterface.TAG_ORIENTATION, lastJpegOrientation.toString())
+            exif.setAttribute(ExifInterface.TAG_ORIENTATION, finalExifOrientation.toString())
             exif.setAttribute(ExifInterface.TAG_MAKE, "Xiaomi")
             exif.setAttribute(ExifInterface.TAG_MODEL, "Xiaomi 13")
             exif.saveAttributes()
 
-            imgWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 4000)
-            imgHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 3000)
+            if (imgWidth <= 0 || imgHeight <= 0) {
+                imgWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 4000)
+                imgHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 3000)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write EXIF to temp file", e)
         }
@@ -1100,12 +1182,13 @@ class Camera2Controller(
             val shutterStr = HardwareCapabilities.formatShutterSpeed(
                 if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
             )
-            val isPortrait = (lastJpegOrientation == 90 || lastJpegOrientation == 270)
+            val isExifRotated = finalExifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                finalExifOrientation == ExifInterface.ORIENTATION_ROTATE_270
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = false,
-                width = if (isPortrait) imgHeight else imgWidth,
-                height = if (isPortrait) imgWidth else imgHeight,
+                width = if (isExifRotated) imgHeight else imgWidth,
+                height = if (isExifRotated) imgWidth else imgHeight,
                 iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
                 focalLength = "1x",
@@ -1144,7 +1227,7 @@ class Camera2Controller(
         uri?.let { destUri ->
             context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
                 val dngCreator = DngCreator(characteristics, captureResult)
-                dngCreator.setOrientation(lastJpegOrientation)
+                dngCreator.setOrientation(degreesToExifOrientation(lastJpegOrientation))
                 if (loc != null) {
                     dngCreator.setLocation(loc)
                 }
@@ -1176,6 +1259,9 @@ class Camera2Controller(
     }
 
     fun closeCamera() {
+        isCapturing = false
+        onLongExposureStateChanged?.invoke(false)
+        onExposureCompleted?.invoke()
         try {
             try {
                 captureSession?.stopRepeating()
