@@ -19,56 +19,11 @@ class CameraHardwareInspector(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     /**
-     * Unified Lens Discovery Engine:
-     * - Case A: Full-range Logical Multi-Camera (Google Pixel 6/7/8 Pro, etc.)
-     *   Camera ID "0" already covers ultra-wide through telephoto via CONTROL_ZOOM_RATIO.
-     *   On these devices, physical sub-cameras CANNOT be opened directly; all optical stops map to ID "0"!
-     * - Case B: Discrete OEM Multi-Cameras (Xiaomi 13, Samsung, OnePlus, etc.)
-     *   Each physical sensor (0.6x, 1x, 3.2x) is a discrete standalone camera ID.
-     *   Deduplicates fake auxiliary cameras (e.g. 1x [ID 5], 1x [ID 6]) and low-res depth sensors.
+     * Deep probe scanner that uncovers manufacturer physical cameras (Xiaomi, Samsung, etc.)
+     * Discovers discrete physical lenses (0.6x, 1x, 3.2x, etc.) based on true optical sensor characteristics.
+     * Deduplicates fake auxiliary cameras (e.g. 1x [ID 5], 1x [ID 6]) and low-res depth sensors.
      */
     fun discoverAllLenses(): List<LensItem> {
-        // First inspect Primary Back Camera "0"
-        val primaryChars = try { cameraManager.getCameraCharacteristics("0") } catch (e: Exception) { null }
-        val primaryZoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            primaryChars?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-        } else null
-
-        // Case A: Unified Logical Multi-Camera (Google Pixel 7 Pro, Pixel 6 Pro, etc.)
-        // When Camera "0" covers ultra-wide (<0.85x) through telephoto (>=3.0x),
-        // physical sub-cameras cannot be opened standalone without crashing.
-        // All optical zoom stops operate natively on Camera "0"!
-        if (primaryZoomRange != null && primaryZoomRange.lower < 0.85f && primaryZoomRange.upper >= 3.0f) {
-            Log.d(TAG, "Device uses Unified Logical Multi-Camera on ID 0: range [${primaryZoomRange.lower}, ${primaryZoomRange.upper}]")
-            val logicalLenses = mutableListOf<LensItem>()
-
-            // 1. Ultra-wide optical stop
-            val uwRatio = primaryZoomRange.lower
-            val uwLabel = if (uwRatio <= 0.55f) "0.5x" else "0.6x"
-            logicalLenses.add(LensItem("zoom_$uwLabel", uwLabel, "0", uwRatio, false))
-
-            // 2. Wide optical stop (1x)
-            logicalLenses.add(LensItem("zoom_1x", "1x", "0", 1.0f, false))
-
-            // 3. Optional 2x crop
-            if (primaryZoomRange.upper >= 2.0f) {
-                logicalLenses.add(LensItem("zoom_2x", "2x", "0", 2.0f, false))
-            }
-
-            // 4. Telephoto optical stop (5x or 3x)
-            if (primaryZoomRange.upper >= 5.0f) {
-                logicalLenses.add(LensItem("zoom_5x", "5x", "0", 5.0f, false))
-            } else if (primaryZoomRange.upper >= 3.0f) {
-                logicalLenses.add(LensItem("zoom_3x", "3x", "0", 3.0f, false))
-            }
-
-            // 5. Add Front Camera
-            addFrontCameras(logicalLenses)
-
-            return logicalLenses
-        }
-
-        // Case B: Discrete Physical OEM Cameras (Xiaomi 13, Samsung, etc.)
         val discoveredCameras = mutableMapOf<String, CameraCharacteristics>()
 
         // 1. Official IDs reported by OS
@@ -103,8 +58,8 @@ class CameraHardwareInspector(private val context: Context) {
             }
         }
 
-        // 3. Deep Probe: Query candidate IDs 0..10 (uncovers Xiaomi physical lenses like ID 4 for 75mm telephoto)
-        val candidateProbeIds = (0..10).map { it.toString() }
+        // 3. Deep Probe: Query candidate IDs 0..30 (uncovers Xiaomi physical lenses like ID 4 for 75mm telephoto)
+        val candidateProbeIds = (0..30).map { it.toString() }
         for (candidateId in candidateProbeIds) {
             if (!discoveredCameras.containsKey(candidateId)) {
                 try {

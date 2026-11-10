@@ -103,7 +103,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val allLenses = inspector.discoverAllLenses()
         val isResume = settingsRepo.isResumeSettingsEnabled
 
-        val targetCamId = if (isResume) settingsRepo.savedCameraId else "0"
+        val targetCamId = if (isResume && allLenses.any { it.cameraId == settingsRepo.savedCameraId }) settingsRepo.savedCameraId else "0"
         val defaultLens = allLenses.find { it.cameraId == targetCamId && !it.isFront }
             ?: allLenses.find { !it.isFront && it.label == "1x" }
             ?: allLenses.firstOrNull { !it.isFront }
