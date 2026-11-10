@@ -397,7 +397,7 @@ fun CameraScreen(
             onResolutionSelected = { res -> viewModel.setResolution(res) },
             onFormatSelected = { fmt -> viewModel.setCaptureFormat(fmt) },
             onDismiss = { isFormatMenuVisible = false },
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier.fillMaxSize()
         )
 
         // Parameter Menu Popover (Centered popup with scale and fade animations)
@@ -405,99 +405,106 @@ fun CameraScreen(
             visible = activeParamMenu != null,
             enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.88f),
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier.fillMaxSize()
         ) {
-            when (displayedParamMenu) {
-                DialParameter.SHUTTER -> {
-                    val minShutter = uiState.capabilities?.shutterSpeedRangeNanos?.lower ?: 100_000L
-                    val maxShutter = uiState.capabilities?.shutterSpeedRangeNanos?.upper ?: 2_000_000_000L
-                    val standardShutters = listOf(
-                        100_000L, 125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
-                        8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
-                        250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L, 4_000_000_000L,
-                        8_000_000_000L, 15_000_000_000L, 30_000_000_000L
-                    )
-                    val shutterSpeeds = (standardShutters.filter { it in minShutter..maxShutter } + listOf(minShutter, maxShutter)).distinct().sorted()
-                    ParameterGridMenu(
-                        visible = true,
-                        title = "SEC // SHUTTER",
-                        items = shutterSpeeds,
-                        selectedItem = uiState.shutterSpeedNanos.coerceIn(minShutter, maxShutter),
-                        limitItem = uiState.minShutterLimitNanos,
-                        onItemLongClick = { nanos -> viewModel.toggleShutterLimit(nanos) },
-                        footerNote = "TIP // Long-press a shutter speed to set as Minimum Shutter Limit (L) for Auto mode.",
-                        rotationDegrees = animatedRotation,
-                        onItemSelected = { nanos ->
-                            viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
-                            viewModel.setShutterSpeedNanos(nanos)
-                        },
-                        formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
-                        onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
-                        isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
-                        onDismiss = { activeParamMenu = null }
-                    )
-                }
-                DialParameter.ISO -> {
-                    val minIso = uiState.capabilities?.isoRange?.lower ?: 50
-                    val maxIso = uiState.capabilities?.isoRange?.upper ?: 3200
-                    val standardIsos = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400, 12800)
-                    val isoValues = (standardIsos.filter { it in minIso..maxIso } + listOf(minIso, maxIso)).distinct().sorted()
-                    ParameterGridMenu(
-                        visible = true,
-                        title = "ISO // SENSOR",
-                        items = isoValues,
-                        selectedItem = uiState.iso.coerceIn(minIso, maxIso),
-                        limitItem = uiState.maxIsoLimit,
-                        onItemLongClick = { iso -> viewModel.toggleIsoLimit(iso) },
-                        footerNote = "TIP // Long-press an ISO to set as Maximum ISO Ceiling (L) for Auto mode.",
-                        rotationDegrees = animatedRotation,
-                        onItemSelected = { iso ->
-                            viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
-                            viewModel.setIso(iso)
-                        },
-                        formatItem = { "$it" },
-                        onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
-                        isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
-                        onDismiss = { activeParamMenu = null }
-                    )
-                }
-                DialParameter.FOCUS -> {
-                    val maxDiopters = uiState.capabilities?.minFocusDistanceDiopters ?: 10.0f
-                    val standardDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f, 15.0f)
-                    val focusDiopters = if (maxDiopters > 0f) {
-                        (standardDiopters.filter { it in 0.0f..maxDiopters } + listOf(maxDiopters)).distinct().sorted()
-                    } else {
-                        listOf(0.0f)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when (displayedParamMenu) {
+                    DialParameter.SHUTTER -> {
+                        val minShutter = uiState.capabilities?.shutterSpeedRangeNanos?.lower ?: 100_000L
+                        val maxShutter = uiState.capabilities?.shutterSpeedRangeNanos?.upper ?: 2_000_000_000L
+                        val standardShutters = listOf(
+                            100_000L, 125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
+                            8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
+                            250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L, 4_000_000_000L,
+                            8_000_000_000L, 15_000_000_000L, 30_000_000_000L
+                        )
+                        val shutterSpeeds = (standardShutters.filter { it in minShutter..maxShutter } + listOf(minShutter, maxShutter)).distinct().sorted()
+                        ParameterGridMenu(
+                            visible = true,
+                            title = "SEC // SHUTTER",
+                            items = shutterSpeeds,
+                            selectedItem = uiState.shutterSpeedNanos.coerceIn(minShutter, maxShutter),
+                            limitItem = uiState.minShutterLimitNanos,
+                            onItemLongClick = { nanos -> viewModel.toggleShutterLimit(nanos) },
+                            footerNote = "TIP // Long-press a shutter speed to set as Minimum Shutter Limit (L) for Auto mode.",
+                            rotationDegrees = animatedRotation,
+                            onItemSelected = { nanos ->
+                                viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
+                                viewModel.setShutterSpeedNanos(nanos)
+                            },
+                            formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
+                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                            isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
+                            onDismiss = { activeParamMenu = null }
+                        )
                     }
-                    ParameterGridMenu(
-                        visible = true,
-                        title = "LENS // FOCUS",
-                        items = focusDiopters,
-                        selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters.coerceIn(0f, maxDiopters) else null,
-                        rotationDegrees = animatedRotation,
-                        onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
-                        formatItem = { if (it == 0f) "∞ MACRO" else String.format(java.util.Locale.US, "%.1fD", it) },
-                        onAutoSelected = { viewModel.toggleAutoFocus() },
-                        isAutoSelected = !uiState.isManualFocusEnabled,
-                        onDismiss = { activeParamMenu = null }
-                    )
+                    DialParameter.ISO -> {
+                        val minIso = uiState.capabilities?.isoRange?.lower ?: 50
+                        val maxIso = uiState.capabilities?.isoRange?.upper ?: 3200
+                        val standardIsos = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400, 12800)
+                        val isoValues = (standardIsos.filter { it in minIso..maxIso } + listOf(minIso, maxIso)).distinct().sorted()
+                        ParameterGridMenu(
+                            visible = true,
+                            title = "ISO // SENSOR",
+                            items = isoValues,
+                            selectedItem = uiState.iso.coerceIn(minIso, maxIso),
+                            limitItem = uiState.maxIsoLimit,
+                            onItemLongClick = { iso -> viewModel.toggleIsoLimit(iso) },
+                            footerNote = "TIP // Long-press an ISO to set as Maximum ISO Ceiling (L) for Auto mode.",
+                            rotationDegrees = animatedRotation,
+                            onItemSelected = { iso ->
+                                viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
+                                viewModel.setIso(iso)
+                            },
+                            formatItem = { "$it" },
+                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                            isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
+                            onDismiss = { activeParamMenu = null }
+                        )
+                    }
+                    DialParameter.FOCUS -> {
+                        val maxDiopters = uiState.capabilities?.minFocusDistanceDiopters ?: 10.0f
+                        val standardDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f, 15.0f)
+                        val focusDiopters = if (maxDiopters > 0f) {
+                            (standardDiopters.filter { it in 0.0f..maxDiopters } + listOf(maxDiopters)).distinct().sorted()
+                        } else {
+                            listOf(0.0f)
+                        }
+                        ParameterGridMenu(
+                            visible = true,
+                            title = "LENS // FOCUS",
+                            items = focusDiopters,
+                            selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters.coerceIn(0f, maxDiopters) else null,
+                            rotationDegrees = animatedRotation,
+                            onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
+                            formatItem = { if (it == 0f) "∞ MACRO" else String.format(java.util.Locale.US, "%.1fD", it) },
+                            onAutoSelected = { viewModel.toggleAutoFocus() },
+                            isAutoSelected = !uiState.isManualFocusEnabled,
+                            onDismiss = { activeParamMenu = null }
+                        )
+                    }
+                    DialParameter.WHITE_BALANCE -> {
+                        val kelvinValues = (2800..7500 step 300).toList()
+                        ParameterGridMenu(
+                            visible = true,
+                            title = "WB // KELVIN",
+                            items = kelvinValues,
+                            selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
+                            rotationDegrees = animatedRotation,
+                            onItemSelected = { k -> viewModel.setKelvin(k) },
+                            formatItem = { "${it}K" },
+                            onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
+                            isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
+                            onDismiss = { activeParamMenu = null }
+                        )
+                    }
+                    else -> {}
                 }
-                DialParameter.WHITE_BALANCE -> {
-                    val kelvinValues = (2800..7500 step 300).toList()
-                    ParameterGridMenu(
-                        visible = true,
-                        title = "WB // KELVIN",
-                        items = kelvinValues,
-                        selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
-                        rotationDegrees = animatedRotation,
-                        onItemSelected = { k -> viewModel.setKelvin(k) },
-                        formatItem = { "${it}K" },
-                        onAutoSelected = { viewModel.setWhiteBalancePreset(WhiteBalancePreset.AUTO) },
-                        isAutoSelected = uiState.whiteBalancePreset == WhiteBalancePreset.AUTO,
-                        onDismiss = { activeParamMenu = null }
-                    )
-                }
-                else -> {}
             }
         }
 
@@ -508,7 +515,7 @@ fun CameraScreen(
             rotationDegrees = animatedRotation,
             onModeSelected = { viewModel.setExposureMode(it) },
             onDismiss = { isModeModalVisible = false },
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier.fillMaxSize()
         )
 
         // Settings Dialog (Centered modal)
@@ -553,7 +560,7 @@ fun CameraScreen(
                 isAdvancedSettingsVisible = true
             },
             onDismiss = { isSettingsDialogVisible = false },
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier.fillMaxSize()
         )
 
         // Advanced Settings Dialog (Fixed Portrait Only, Nothing OS / shadcn)

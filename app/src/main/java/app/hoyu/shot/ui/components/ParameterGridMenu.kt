@@ -22,7 +22,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
@@ -67,8 +66,7 @@ fun <T> ParameterGridMenu(
 
     Box(
         modifier = modifier
-            .padding(16.dp)
-            .rotate(rotationDegrees)
+            .rotateBounds(rotationDegrees)
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {

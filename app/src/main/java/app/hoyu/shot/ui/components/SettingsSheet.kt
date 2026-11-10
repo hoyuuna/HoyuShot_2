@@ -21,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -57,12 +56,18 @@ fun SettingsDialog(
         visible = visible,
         enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
         exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
-        modifier = modifier.padding(16.dp)
+        modifier = modifier.fillMaxSize()
     ) {
         Box(
-            modifier = Modifier.rotate(rotationDegrees),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
+            Box(
+                modifier = Modifier.rotateBounds(rotationDegrees),
+                contentAlignment = Alignment.Center
+            ) {
             Column(
                 modifier = Modifier
                     .width(320.dp)
@@ -363,6 +368,7 @@ fun SettingsDialog(
                     )
                 }
             }
+        }
         }
     }
 }

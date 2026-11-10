@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
@@ -66,27 +65,33 @@ fun ModeDialSelectorModal(
         visible = visible,
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.88f),
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.88f),
-        modifier = modifier.padding(16.dp)
+        modifier = modifier.fillMaxSize()
     ) {
         Box(
             modifier = Modifier
-                .rotate(rotationDegrees)
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            val touching = event.changes.any { it.pressed }
-                            if (touching != isFingerTouching) {
-                                isFingerTouching = touching
-                                if (!touching) {
-                                    touchReleaseEpoch = System.currentTimeMillis()
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .rotateBounds(rotationDegrees)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                val touching = event.changes.any { it.pressed }
+                                if (touching != isFingerTouching) {
+                                    isFingerTouching = touching
+                                    if (!touching) {
+                                        touchReleaseEpoch = System.currentTimeMillis()
+                                    }
                                 }
                             }
                         }
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
+                    },
+                contentAlignment = Alignment.Center
+            ) {
             Column(
                 modifier = Modifier
                     .width(280.dp)
@@ -196,6 +201,7 @@ fun ModeDialSelectorModal(
                     }
                 }
             }
+        }
         }
     }
 }

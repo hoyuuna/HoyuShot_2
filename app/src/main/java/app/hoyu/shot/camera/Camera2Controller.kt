@@ -996,14 +996,12 @@ class Camera2Controller(
                 @Suppress("DEPRECATION")
                 context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Short, snappy, instant but strong mechanical shutter kick (Haptic motor heavy click)
-                vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(18L, 255))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Short, snappy, full-amplitude mechanical shutter kick (single strong jolt)
+                vibrator?.vibrate(VibrationEffect.createOneShot(42L, 255))
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(20L)
+                vibrator?.vibrate(42L)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Shutter vibration failed", e)
