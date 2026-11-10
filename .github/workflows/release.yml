@@ -67,14 +67,12 @@ jobs:
             COMMIT_MSG=$(git log -1 --pretty=%B)
           fi
 
-          cat <<EOF > release_notes.md
-**Changelog:**
-$COMMIT_MSG
-
-| File | Platform |
-| :--- | :--- |
-| \`$TARGET_NAME\` | Android (Universal: ARM64, ARMv7, x86, x86_64 - Android 8.0+) |
-EOF
+          echo "**Changelog:**" > release_notes.md
+          echo "$COMMIT_MSG" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "| File | Platform |" >> release_notes.md
+          echo "| :--- | :--- |" >> release_notes.md
+          echo "| \`$TARGET_NAME\` | Android (Universal: ARM64, ARMv7, x86, x86_64 - Android 8.0+) |" >> release_notes.md
 
       - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v2
