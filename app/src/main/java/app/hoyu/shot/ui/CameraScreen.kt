@@ -388,16 +388,20 @@ fun CameraScreen(
         ) {
             when (displayedParamMenu) {
                 DialParameter.SHUTTER -> {
-                    val shutterSpeeds = listOf(
-                        125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
+                    val minShutter = uiState.capabilities?.shutterSpeedRangeNanos?.lower ?: 100_000L
+                    val maxShutter = uiState.capabilities?.shutterSpeedRangeNanos?.upper ?: 2_000_000_000L
+                    val standardShutters = listOf(
+                        100_000L, 125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
                         8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
-                        250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L
+                        250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L, 4_000_000_000L,
+                        8_000_000_000L, 15_000_000_000L, 30_000_000_000L
                     )
+                    val shutterSpeeds = (standardShutters.filter { it in minShutter..maxShutter } + listOf(minShutter, maxShutter)).distinct().sorted()
                     ParameterGridMenu(
                         visible = true,
                         title = "SEC // SHUTTER",
                         items = shutterSpeeds,
-                        selectedItem = uiState.shutterSpeedNanos,
+                        selectedItem = uiState.shutterSpeedNanos.coerceIn(minShutter, maxShutter),
                         rotationDegrees = animatedRotation,
                         onItemSelected = { nanos ->
                             viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
@@ -410,12 +414,15 @@ fun CameraScreen(
                     )
                 }
                 DialParameter.ISO -> {
-                    val isoValues = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
+                    val minIso = uiState.capabilities?.isoRange?.lower ?: 50
+                    val maxIso = uiState.capabilities?.isoRange?.upper ?: 3200
+                    val standardIsos = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400, 12800)
+                    val isoValues = (standardIsos.filter { it in minIso..maxIso } + listOf(minIso, maxIso)).distinct().sorted()
                     ParameterGridMenu(
                         visible = true,
                         title = "ISO // SENSOR",
                         items = isoValues,
-                        selectedItem = uiState.iso,
+                        selectedItem = uiState.iso.coerceIn(minIso, maxIso),
                         rotationDegrees = animatedRotation,
                         onItemSelected = { iso ->
                             viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
@@ -428,15 +435,21 @@ fun CameraScreen(
                     )
                 }
                 DialParameter.FOCUS -> {
-                    val focusDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f)
+                    val maxDiopters = uiState.capabilities?.minFocusDistanceDiopters ?: 10.0f
+                    val standardDiopters = listOf(0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 7.0f, 10.0f, 15.0f)
+                    val focusDiopters = if (maxDiopters > 0f) {
+                        (standardDiopters.filter { it in 0.0f..maxDiopters } + listOf(maxDiopters)).distinct().sorted()
+                    } else {
+                        listOf(0.0f)
+                    }
                     ParameterGridMenu(
                         visible = true,
                         title = "LENS // FOCUS",
                         items = focusDiopters,
-                        selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters else null,
+                        selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters.coerceIn(0f, maxDiopters) else null,
                         rotationDegrees = animatedRotation,
                         onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
-                        formatItem = { if (it == 0f) "∞ MACRO" else String.format("%.1fD", it) },
+                        formatItem = { if (it == 0f) "∞ MACRO" else String.format(java.util.Locale.US, "%.1fD", it) },
                         onAutoSelected = { viewModel.toggleAutoFocus() },
                         isAutoSelected = !uiState.isManualFocusEnabled,
                         onDismiss = { activeParamMenu = null }

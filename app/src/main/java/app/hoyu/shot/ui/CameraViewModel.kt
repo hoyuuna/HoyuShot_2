@@ -126,11 +126,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             try { ExposureMode.valueOf(settingsRepo.savedExposureMode) } catch (e: Exception) { ExposureMode.AUTO }
         } else ExposureMode.AUTO
 
-        val initIso = if (isResume) settingsRepo.savedIso else (caps?.isoRange?.lower ?: 100)
-        val initShutter = if (isResume) settingsRepo.savedShutterNanos else (caps?.shutterSpeedRangeNanos?.lower ?: 10_000_000L)
-        val initFocus = if (isResume) settingsRepo.savedFocusDiopters else 0f
-        val initIsManualFocus = if (isResume) settingsRepo.savedIsManualFocus else false
-        val initEv = if (isResume) settingsRepo.savedEvIndex else 0
+        val initIso = if (isResume) {
+            val saved = settingsRepo.savedIso
+            caps?.isoRange?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
+        } else (caps?.isoRange?.lower ?: 100)
+
+        val initShutter = if (isResume) {
+            val saved = settingsRepo.savedShutterNanos
+            caps?.shutterSpeedRangeNanos?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
+        } else (caps?.shutterSpeedRangeNanos?.lower ?: 10_000_000L)
+
+        val initFocus = if (isResume && caps != null && caps.supportsManualFocus) {
+            settingsRepo.savedFocusDiopters.coerceIn(0f, caps.minFocusDistanceDiopters)
+        } else 0f
+        val initIsManualFocus = if (isResume && caps != null && caps.supportsManualFocus) {
+            settingsRepo.savedIsManualFocus
+        } else false
+        val initEv = if (isResume) {
+            val saved = settingsRepo.savedEvIndex
+            caps?.evCompensationRange?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
+        } else 0
         val initKelvin = if (isResume) settingsRepo.savedKelvin else 5500
         val initRaw = if (isResume) settingsRepo.savedRawEnabled else false
 
@@ -622,17 +637,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (topRes != null) {
                 cameraController.targetResolution = Pair(topRes.width, topRes.height)
             }
+
+            // Strictly clamp parameters to the new sensor's physical hardware limits
+            val clampedIso = caps?.isoRange?.let { range -> _uiState.value.iso.coerceIn(range.lower, range.upper) } ?: _uiState.value.iso
+            val clampedShutter = caps?.shutterSpeedRangeNanos?.let { range -> _uiState.value.shutterSpeedNanos.coerceIn(range.lower, range.upper) } ?: _uiState.value.shutterSpeedNanos
+            val clampedFocus = if (caps != null && caps.supportsManualFocus) {
+                _uiState.value.focusDistanceDiopters.coerceIn(0f, caps.minFocusDistanceDiopters)
+            } else 0f
+            val clampedIsManualFocus = if (caps != null && !caps.supportsManualFocus) false else _uiState.value.isManualFocusEnabled
+            val clampedEv = caps?.evCompensationRange?.let { range -> _uiState.value.evCompensationIndex.coerceIn(range.lower, range.upper) } ?: _uiState.value.evCompensationIndex
+
             _uiState.update {
                 it.copy(
                     currentCameraId = lens.cameraId,
                     capabilities = caps,
                     availableResolutions = resList,
                     selectedResolution = topRes,
-                    selectedMegapixels = topRes?.mpLabel ?: it.selectedMegapixels
+                    selectedMegapixels = topRes?.mpLabel ?: it.selectedMegapixels,
+                    iso = clampedIso,
+                    shutterSpeedNanos = clampedShutter,
+                    focusDistanceDiopters = clampedFocus,
+                    isManualFocusEnabled = clampedIsManualFocus,
+                    evCompensationIndex = clampedEv
                 )
             }
             if (_uiState.value.isResumeSettingsEnabled) {
                 settingsRepo.savedCameraId = lens.cameraId
+                settingsRepo.savedIso = clampedIso
+                settingsRepo.savedShutterNanos = clampedShutter
+                settingsRepo.savedFocusDiopters = clampedFocus
+                settingsRepo.savedIsManualFocus = clampedIsManualFocus
+                settingsRepo.savedEvIndex = clampedEv
             }
             cameraController.switchCamera(lens.cameraId, surface, _uiState.value.aspectRatio) { width, height ->
                 _uiState.update { it.copy(previewSize = Pair(width, height)) }
@@ -828,27 +863,40 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setIso(iso: Int) {
-        _uiState.update { it.copy(iso = iso) }
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIso = iso
+        val caps = _uiState.value.capabilities
+        val clamped = caps?.isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso
+        _uiState.update { it.copy(iso = clamped) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIso = clamped
         applyCurrentSettings()
     }
 
     fun setShutterSpeedNanos(nanos: Long) {
-        _uiState.update { it.copy(shutterSpeedNanos = nanos) }
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedShutterNanos = nanos
+        val caps = _uiState.value.capabilities
+        val clamped = caps?.shutterSpeedRangeNanos?.let { nanos.coerceIn(it.lower, it.upper) } ?: nanos
+        _uiState.update { it.copy(shutterSpeedNanos = clamped) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedShutterNanos = clamped
         applyCurrentSettings()
     }
 
     fun setFocusDistance(diopters: Float) {
-        _uiState.update { it.copy(focusDistanceDiopters = diopters, isManualFocusEnabled = true) }
+        val caps = _uiState.value.capabilities
+        if (caps != null && !caps.supportsManualFocus) return
+        val maxDiopters = caps?.minFocusDistanceDiopters ?: 10f
+        val clamped = diopters.coerceIn(0f, maxDiopters)
+        _uiState.update { it.copy(focusDistanceDiopters = clamped, isManualFocusEnabled = true) }
         if (_uiState.value.isResumeSettingsEnabled) {
-            settingsRepo.savedFocusDiopters = diopters
+            settingsRepo.savedFocusDiopters = clamped
             settingsRepo.savedIsManualFocus = true
         }
         applyCurrentSettings()
     }
 
     fun toggleAutoFocus() {
+        val caps = _uiState.value.capabilities
+        if (caps != null && !caps.supportsManualFocus) {
+            _uiState.update { it.copy(isManualFocusEnabled = false) }
+            return
+        }
         val manual = !_uiState.value.isManualFocusEnabled
         _uiState.update { it.copy(isManualFocusEnabled = manual) }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIsManualFocus = manual
@@ -856,8 +904,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setEvCompensation(evIndex: Int) {
-        _uiState.update { it.copy(evCompensationIndex = evIndex) }
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedEvIndex = evIndex
+        val caps = _uiState.value.capabilities
+        val clamped = caps?.evCompensationRange?.let { evIndex.coerceIn(it.lower, it.upper) } ?: evIndex
+        _uiState.update { it.copy(evCompensationIndex = clamped) }
+        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedEvIndex = clamped
         applyCurrentSettings()
     }
 

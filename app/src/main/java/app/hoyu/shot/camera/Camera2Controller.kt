@@ -586,38 +586,50 @@ class Camera2Controller(
                 }
             }
 
+            val evRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+            val validEv = if (evRange != null) currentEvIndex.coerceIn(evRange.lower, evRange.upper) else currentEvIndex
+
+            val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            val minIso = isoRange?.lower ?: 50
+            val maxIso = isoRange?.upper ?: 6400
+            val validIso = currentIso.coerceIn(minIso, maxIso)
+
+            val shutterRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            val minShutter = shutterRange?.lower ?: 100_000L
+            val maxShutter = shutterRange?.upper ?: 1_000_000_000L
+            val validShutter = currentShutterNanos.coerceIn(minShutter, maxShutter)
+
+            val maxDiopters = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val validFocus = currentFocusDistance.coerceIn(0f, maxDiopters)
+
             // 2. Exposure Mode calculation (Fixing dark preview bug!)
             when (currentExposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
                     // Fully automated AE with user EV compensation
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, currentEvIndex)
+                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
                     // Lock Shutter, dynamically balance ISO using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
-                    val minIso = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.lower ?: 50
-                    val maxIso = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.upper ?: 6400
-                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(100.0 * 10_000_000.0)
-                    val dynIso = (targetExposure / currentShutterNanos.toDouble()).toInt().coerceIn(minIso, maxIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
+                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+                    val dynIso = (targetExposure / validShutter.toDouble()).toInt().coerceIn(minIso, maxIso)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, dynIso)
                 }
                 ExposureMode.ISO_PRIORITY -> {
                     // Lock ISO, dynamically balance Shutter using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-                    val minShutter = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.lower ?: 100_000L
-                    val maxShutter = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.upper ?: 1_000_000_000L
-                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(100.0 * 10_000_000.0)
-                    val dynShutter = (targetExposure / currentIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
+                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+                    val dynShutter = (targetExposure / validIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
                 }
                 ExposureMode.MANUAL -> {
                     // Full manual control
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentShutterNanos)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
                 }
             }
 
@@ -625,9 +637,9 @@ class Camera2Controller(
             builder.set(CaptureRequest.CONTROL_AE_LOCK, isAeLocked)
 
             // 4. Focus
-            if (currentIsManualFocus) {
+            if (currentIsManualFocus && maxDiopters > 0f) {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, validFocus)
             } else {
                 if (isAfLocked) {
                     builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
