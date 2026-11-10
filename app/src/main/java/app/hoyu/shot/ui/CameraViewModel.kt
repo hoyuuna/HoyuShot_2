@@ -153,6 +153,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             settingsRepo.isGeotaggingEnabled = false
         }
         cameraController.isGeotaggingEnabled = initGeo
+        cameraController.isRawCaptureEnabled = initRaw
         cameraController.jpegQuality = settingsRepo.jpegQuality
         cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
         cameraController.antibandingMode = settingsRepo.antibandingMode
@@ -569,6 +570,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 captureRaw = willCaptureRaw
             )
         }
+        cameraController.isRawCaptureEnabled = willCaptureRaw
         if (_uiState.value.isResumeSettingsEnabled) {
             settingsRepo.savedRawEnabled = willCaptureRaw
         }
@@ -873,6 +875,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleRaw() {
         val next = !_uiState.value.captureRaw
         _uiState.update { it.copy(captureRaw = next) }
+        cameraController.isRawCaptureEnabled = next
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedRawEnabled = next
     }
 

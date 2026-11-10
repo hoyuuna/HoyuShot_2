@@ -75,6 +75,21 @@ class Camera2Controller(
             }
         }
     var onExposureCompleted: (() -> Unit)? = null
+    var isRawCaptureEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                val chars = currentCharacteristics
+                if (cameraDevice != null && chars != null) {
+                    val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    if (map != null) {
+                        setupRawImageReader(map)
+                        createCaptureSession()
+                    }
+                }
+            }
+        }
+    private var openRetryCount = 0
 
     fun hasLocationPermission(): Boolean = locationHelper.hasLocationPermission()
 
@@ -162,6 +177,7 @@ class Camera2Controller(
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
+                    openRetryCount = 0
                     cameraDevice = camera
                     createCaptureSession()
                 }
@@ -172,8 +188,24 @@ class Camera2Controller(
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera $cameraId error code: $error")
                     camera.close()
                     cameraDevice = null
+
+                    // If camera was busy (driver still releasing previous device), retry once after 120ms
+                    if ((error == CameraDevice.StateCallback.ERROR_CAMERA_IN_USE ||
+                                error == CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE) &&
+                        openRetryCount < 1
+                    ) {
+                        openRetryCount++
+                        Log.w(TAG, "Retrying openCamera for $cameraId after busy error...")
+                        backgroundHandler?.postDelayed({
+                            openCamera(cameraId, previewSurface, targetRatio, onPreviewSizeCalculated)
+                        }, 120L)
+                        return
+                    }
+
+                    openRetryCount = 0
                     onError("Camera error code: $error")
                 }
             }, backgroundHandler)
@@ -190,7 +222,26 @@ class Camera2Controller(
         onPreviewSizeCalculated: (width: Int, height: Int) -> Unit
     ) {
         closeCamera()
-        openCamera(newCameraId, newSurface, targetRatio, onPreviewSizeCalculated)
+        // Allow HAL a short breather on the background handler to release hardware device locks
+        backgroundHandler?.postDelayed({
+            openCamera(newCameraId, newSurface, targetRatio, onPreviewSizeCalculated)
+        }, 80L) ?: run {
+            openCamera(newCameraId, newSurface, targetRatio, onPreviewSizeCalculated)
+        }
+    }
+
+    private fun setupRawImageReader(map: android.hardware.camera2.params.StreamConfigurationMap) {
+        rawImageReader?.close()
+        rawImageReader = null
+        if (isRawCaptureEnabled) {
+            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR)
+            val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
+            if (largestRaw != null) {
+                rawImageReader = ImageReader.newInstance(
+                    largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 2
+                )
+            }
+        }
     }
 
     private fun setupImageReaders(chars: CameraCharacteristics, targetRatio: AspectRatio) {
@@ -241,7 +292,7 @@ class Camera2Controller(
         }
 
         jpegImageReader = ImageReader.newInstance(
-            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 16
+            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 4
         ).apply {
             setOnImageAvailableListener({ reader ->
                 while (true) {
@@ -263,14 +314,8 @@ class Camera2Controller(
             }, backgroundHandler)
         }
 
-        // 3. RAW_SENSOR stream
-        val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR)
-        val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
-        if (largestRaw != null) {
-            rawImageReader = ImageReader.newInstance(
-                largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 8
-            )
-        }
+        // 3. RAW_SENSOR stream (strictly allocated only when RAW is active)
+        setupRawImageReader(map)
     }
 
     private fun createCaptureSession() {
@@ -278,16 +323,22 @@ class Camera2Controller(
         val pSurface = previewSurface ?: return
 
         try {
+            // Keep stream count minimal (Open Camera pattern) to prevent HAL driver crash on auxiliary sub-cameras
             val surfaces = mutableListOf<Surface>().apply {
                 add(pSurface)
-                analysisImageReader?.surface?.let { add(it) }
                 jpegImageReader?.surface?.let { add(it) }
-                rawImageReader?.surface?.let { add(it) }
+                if (isRawCaptureEnabled && rawImageReader != null) {
+                    rawImageReader?.surface?.let { add(it) }
+                } else {
+                    analysisImageReader?.surface?.let { add(it) }
+                }
             }
 
             previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(pSurface)
-                analysisImageReader?.surface?.let { addTarget(it) }
+                if (!isRawCaptureEnabled) {
+                    analysisImageReader?.surface?.let { addTarget(it) }
+                }
             }
 
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
@@ -297,7 +348,7 @@ class Camera2Controller(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.w(TAG, "4-surface capture session failed, attempting fallback preview+jpeg session")
+                    Log.w(TAG, "Capture session configuration failed, attempting fallback preview+jpeg session")
                     try {
                         val fallbackSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
                         previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
