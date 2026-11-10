@@ -29,12 +29,14 @@ import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.CameraUiState
 import app.hoyu.shot.updater.UpdateCheckResult
 import app.hoyu.shot.updater.UpdateManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun AdvancedSettingsDialog(
     visible: Boolean,
+    scrollToUpdates: Boolean = false,
     uiState: CameraUiState,
     onJpegQualityChanged: (Int) -> Unit,
     onToggleMirrorSelfie: () -> Unit,
@@ -63,6 +65,23 @@ fun AdvancedSettingsDialog(
     var downloadProgress by remember { mutableStateOf<Int?>(null) }
     var downloadProgressText by remember { mutableStateOf("") }
     var downloadedApkFile by remember { mutableStateOf<File?>(null) }
+
+    LaunchedEffect(visible, scrollToUpdates) {
+        if (visible && scrollToUpdates) {
+            delay(250)
+            scrollState.animateScrollTo(scrollState.maxValue)
+            if (updateResult == null && !isCheckingUpdate) {
+                isCheckingUpdate = true
+                scope.launch {
+                    val res = updateManager.checkForUpdates(includePreRelease = uiState.isPreReleaseUpdateEnabled)
+                    updateResult = res
+                    isCheckingUpdate = false
+                    delay(120)
+                    scrollState.animateScrollTo(scrollState.maxValue)
+                }
+            }
+        }
+    }
 
     // Fixed portrait modal with smooth scale + fade + slide open/close animation
     AnimatedVisibility(

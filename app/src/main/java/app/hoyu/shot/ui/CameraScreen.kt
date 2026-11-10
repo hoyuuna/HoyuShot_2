@@ -80,6 +80,7 @@ fun CameraScreen(
     var isModeModalVisible by remember { mutableStateOf(false) }
     var isSettingsDialogVisible by remember { mutableStateOf(false) }
     var isAdvancedSettingsVisible by remember { mutableStateOf(false) }
+    var scrollToUpdates by remember { mutableStateOf(false) }
     var isFormatMenuVisible by remember { mutableStateOf(false) }
     var activeParamMenu by remember { mutableStateOf<DialParameter?>(null) }
     // Maintain last non-null parameter card so the exit animation (scale + fade) renders smoothly
@@ -90,13 +91,29 @@ fun CameraScreen(
         }
     }
 
+    val openUpdateEvent by viewModel.openUpdateSettingsEvent.collectAsState()
+    LaunchedEffect(openUpdateEvent) {
+        if (openUpdateEvent) {
+            activeParamMenu = null
+            isFormatMenuVisible = false
+            isModeModalVisible = false
+            isSettingsDialogVisible = false
+            isAdvancedSettingsVisible = true
+            scrollToUpdates = true
+            viewModel.consumeOpenUpdateSettings()
+        }
+    }
+
     // Intercept system Back button so it navigates internally inside the app
     BackHandler(
         enabled = uiState.isGalleryVisible || activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
     ) {
         when {
             uiState.isGalleryVisible -> viewModel.closeGallery()
-            isAdvancedSettingsVisible -> isAdvancedSettingsVisible = false
+            isAdvancedSettingsVisible -> {
+                isAdvancedSettingsVisible = false
+                scrollToUpdates = false
+            }
             activeParamMenu != null -> activeParamMenu = null
             isFormatMenuVisible -> isFormatMenuVisible = false
             isModeModalVisible -> isModeModalVisible = false
@@ -537,6 +554,7 @@ fun CameraScreen(
         // Advanced Settings Dialog (Fixed Portrait Only, Nothing OS / shadcn)
         AdvancedSettingsDialog(
             visible = isAdvancedSettingsVisible,
+            scrollToUpdates = scrollToUpdates,
             uiState = uiState,
             onJpegQualityChanged = { viewModel.setJpegQuality(it) },
             onToggleMirrorSelfie = { viewModel.toggleMirrorSelfie() },
@@ -550,7 +568,10 @@ fun CameraScreen(
             onToggleUiBlur = { viewModel.toggleUiBlur() },
             onToggleAutoUpdateCheck = { viewModel.toggleAutoUpdateCheck() },
             onTogglePreReleaseUpdate = { viewModel.togglePreReleaseUpdate() },
-            onDismiss = { isAdvancedSettingsVisible = false }
+            onDismiss = {
+                isAdvancedSettingsVisible = false
+                scrollToUpdates = false
+            }
         )
 
         // ProShot-style Gallery Viewer (Animated with swipe direction)

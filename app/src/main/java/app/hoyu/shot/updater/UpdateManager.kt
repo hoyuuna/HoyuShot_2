@@ -303,14 +303,15 @@ class UpdateManager(private val context: Context) {
             notificationManager.createNotificationChannel(channel)
         }
 
-        // Tap notification to immediately download latest APK via browser / system downloader
-        val notifyIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl)).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // Tap notification to open app Settings and scroll directly to Update section
+        val notifyIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("OPEN_ADVANCED_SETTINGS_UPDATE", true)
         }
 
         val pendingIntent = PendingIntent.getActivity(
             context,
-            0,
+            1001,
             notifyIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -327,7 +328,7 @@ class UpdateManager(private val context: Context) {
                 if (largeIconBitmap != null) setLargeIcon(largeIconBitmap)
             }
             .setContentTitle("HoyuShot ${info.tagName} Available")
-            .setContentText("Tap to download update ${info.tagName}")
+            .setContentText("Tap to review and install update ${info.tagName}")
             .setStyle(NotificationCompat.BigTextStyle().bigText("Version ${info.tagName} is ready:\n${info.changelog}"))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)

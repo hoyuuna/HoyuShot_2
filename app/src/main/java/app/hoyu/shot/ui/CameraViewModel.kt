@@ -27,6 +27,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
+    private val _openUpdateSettingsEvent = MutableStateFlow(false)
+    val openUpdateSettingsEvent: StateFlow<Boolean> = _openUpdateSettingsEvent.asStateFlow()
+
+    fun triggerOpenUpdateSettings() {
+        _openUpdateSettingsEvent.value = true
+    }
+
+    fun consumeOpenUpdateSettings() {
+        _openUpdateSettingsEvent.value = false
+    }
+
     private val horizonSensor = HorizonSensorManager(application)
     private val orientationListener = DeviceOrientationListener(application)
     private val inspector = CameraHardwareInspector(application)

@@ -1,6 +1,7 @@
 package app.hoyu.shot
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         checkAndRequestPermissions()
+        handleNotificationIntent(intent)
 
         setContent {
             MaterialTheme {
@@ -71,6 +73,18 @@ class MainActivity : ComponentActivity() {
         val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (hasCameraPermission != cameraGranted) {
             hasCameraPermission = cameraGranted
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("OPEN_ADVANCED_SETTINGS_UPDATE", false) == true) {
+            viewModel.triggerOpenUpdateSettings()
         }
     }
 
