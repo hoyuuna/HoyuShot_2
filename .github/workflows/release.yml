@@ -54,7 +54,7 @@ jobs:
         run: |
           VERSION="${{ inputs.custom_version }}"
           if [ -z "$VERSION" ]; then
-            OFFSET=45
+            OFFSET=46
             BUILD_INDEX=$(( ${{ github.run_number }} - OFFSET ))
             if [ $BUILD_INDEX -lt 0 ]; then BUILD_INDEX=0; fi
             VERSION="1.0.${BUILD_INDEX}"
@@ -72,7 +72,7 @@ jobs:
         run: |
           VERSION="${{ inputs.custom_version }}"
           if [ -z "$VERSION" ]; then
-            OFFSET=45
+            OFFSET=46
             BUILD_INDEX=$(( ${{ github.run_number }} - OFFSET ))
             if [ $BUILD_INDEX -lt 0 ]; then BUILD_INDEX=0; fi
             VERSION="1.0.${BUILD_INDEX}"
