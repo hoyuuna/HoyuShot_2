@@ -892,7 +892,7 @@ private fun BottomControlsContent(
                 contentAlignment = Alignment.Center
             ) {
                 // Burst count indicator badge when burst shooting is active
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = isBursting && burstCount > 0,
                     enter = fadeIn(tween(100)) + scaleIn(tween(100)),
                     exit = fadeOut(tween(150)) + scaleOut(tween(150)),

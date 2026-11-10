@@ -51,8 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.exifinterface.media.ExifInterface
 import app.hoyu.shot.model.CapturedPhotoInfo
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -369,13 +368,13 @@ private fun ZoomablePhotoItem(
                     onDoubleTap = {
                         coroutineScope.launch {
                             if (scaleAnim.value > 1.1f) {
-                                launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMedium)) }
-                                launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
-                                launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
                             } else {
-                                launch { scaleAnim.animateTo(2.5f, spring(stiffness = Spring.StiffnessMedium)) }
-                                launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
-                                launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { scaleAnim.animateTo(2.5f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                coroutineScope.launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
                             }
                         }
                     },
