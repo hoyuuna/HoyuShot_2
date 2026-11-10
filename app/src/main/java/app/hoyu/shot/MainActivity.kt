@@ -82,6 +82,17 @@ class MainActivity : ComponentActivity() {
             requestPermissionLauncher.launch(required.toTypedArray())
         }
     }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            val handled = viewModel.handleVolumeKey(isUp = true)
+            if (handled) return true
+        } else if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val handled = viewModel.handleVolumeKey(isUp = false)
+            if (handled) return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 }
 
 @Composable

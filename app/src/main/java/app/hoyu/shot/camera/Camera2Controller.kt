@@ -3,7 +3,10 @@ package app.hoyu.shot.camera
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
@@ -12,6 +15,9 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
@@ -23,6 +29,7 @@ import app.hoyu.shot.sensors.LocationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -96,6 +103,14 @@ class Camera2Controller(
     var targetResolution: Pair<Int, Int>? = null
     var deviceOrientationDegrees: Int = 0
     private var lastJpegOrientation: Int = 0
+
+    var currentAeMeteringRect: MeteringRectangle? = null
+    var currentAfMeteringRect: MeteringRectangle? = null
+    var isSpotAeActive: Boolean = false
+    var jpegQuality: Int = 95
+    var isMirrorSelfie: Boolean = false
+    var antibandingMode: String = "AUTO"
+    var cameraSoundMode: String = "VIBRATE"
 
     var lastMeasuredIso = 100
     var lastMeasuredShutter = 10_000_000L
@@ -306,6 +321,51 @@ class Camera2Controller(
         }
     }
 
+    fun triggerSpotAe(normX: Float?, normY: Float?) {
+        val chars = currentCharacteristics ?: return
+        val builder = previewRequestBuilder ?: return
+        val session = captureSession ?: return
+
+        try {
+            if (normX != null && normY != null) {
+                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                    ?: Rect(0, 0, 4000, 3000)
+                val sensorX = (normX * activeArray.width()).toInt().coerceIn(0, activeArray.width())
+                val sensorY = (normY * activeArray.height()).toInt().coerceIn(0, activeArray.height())
+                val halfBox = (activeArray.width() * 0.06f).toInt()
+                val meteringBox = Rect(
+                    (sensorX - halfBox).coerceAtLeast(0),
+                    (sensorY - halfBox).coerceAtLeast(0),
+                    (sensorX + halfBox).coerceAtMost(activeArray.width()),
+                    (sensorY + halfBox).coerceAtMost(activeArray.height())
+                )
+                val rect = MeteringRectangle(meteringBox, MeteringRectangle.METERING_WEIGHT_MAX)
+                currentAeMeteringRect = rect
+                isSpotAeActive = true
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(rect))
+                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+            } else {
+                currentAeMeteringRect = null
+                isSpotAeActive = false
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
+            }
+            session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    super.onCaptureCompleted(session, request, result)
+                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                }
+            }, backgroundHandler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Spot AE metering failed", e)
+        }
+    }
+
     fun triggerTapToFocus(
         normX: Float,
         normY: Float,
@@ -332,9 +392,13 @@ class Camera2Controller(
             )
 
             val meteringRect = MeteringRectangle(meteringBox, MeteringRectangle.METERING_WEIGHT_MAX)
+            currentAfMeteringRect = meteringRect
 
             builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(meteringRect))
-            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(meteringRect))
+            // Only set AE to focus point if Spot AE is not currently active
+            if (currentAeMeteringRect == null) {
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(meteringRect))
+            }
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
 
@@ -366,10 +430,14 @@ class Camera2Controller(
         val builder = previewRequestBuilder ?: return
         try {
             isAfLocked = false
+            currentAfMeteringRect = null
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             builder.set(CaptureRequest.CONTROL_AF_REGIONS, null)
-            builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+            // Only reset AE region if Spot AE is not active
+            if (currentAeMeteringRect == null) {
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+            }
             session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
                     session: CameraCaptureSession,
@@ -525,6 +593,23 @@ class Camera2Controller(
                 SharpnessMode.HIGH -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
             }
 
+            // 9. Spot AE & AF Metering Regions
+            if (currentAeMeteringRect != null) {
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(currentAeMeteringRect))
+            }
+            if (currentAfMeteringRect != null) {
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(currentAfMeteringRect))
+            }
+
+            // 10. Antibanding Mode
+            val abMode = when (antibandingMode) {
+                "OFF" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
+                "50HZ" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+                "60HZ" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+                else -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+            }
+            builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, abMode)
+
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply camera settings", e)
@@ -609,7 +694,11 @@ class Camera2Controller(
                 }
             }
 
-            captureBuilder.set(CaptureRequest.JPEG_QUALITY, 100.toByte())
+            captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
+
+            if (cameraSoundMode == "VIBRATE") {
+                triggerShutterVibration()
+            }
 
             // Correct EXIF orientation for portrait / landscape holding
             val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
@@ -675,11 +764,52 @@ class Camera2Controller(
         }
     }
 
+    private fun triggerShutterVibration() {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(45L, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(45L)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Shutter vibration failed", e)
+        }
+    }
+
     private fun saveJpegBytes(bytes: ByteArray) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val count = photoCounter.incrementAndGet() % 10000
         val fileName = "IMG_${timeStamp}_${String.format(Locale.US, "%04d", count)}.jpg"
         val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
+
+        val isFrontCam = currentCharacteristics?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        val finalBytes = if (isFrontCam && isMirrorSelfie) {
+            try {
+                val origBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (origBitmap != null) {
+                    val matrix = Matrix().apply { postScale(-1f, 1f) }
+                    val mirrored = Bitmap.createBitmap(origBitmap, 0, 0, origBitmap.width, origBitmap.height, matrix, true)
+                    val baos = ByteArrayOutputStream()
+                    mirrored.compress(Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+                    origBitmap.recycle()
+                    mirrored.recycle()
+                    baos.toByteArray()
+                } else bytes
+            } catch (e: Exception) {
+                Log.e(TAG, "Mirror selfie processing failed", e)
+                bytes
+            }
+        } else {
+            bytes
+        }
 
         // 1. Write bytes to temporary file on disk so ExifInterface can safely write GPS tags
         val tempFile = java.io.File(context.cacheDir, "temp_$fileName")
@@ -688,7 +818,7 @@ class Camera2Controller(
 
         try {
             tempFile.outputStream().use { fos ->
-                fos.write(bytes)
+                fos.write(finalBytes)
             }
 
             val exif = ExifInterface(tempFile.absolutePath)

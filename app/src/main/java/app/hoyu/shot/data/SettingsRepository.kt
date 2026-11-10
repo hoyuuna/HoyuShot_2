@@ -82,4 +82,55 @@ class SettingsRepository(context: Context) {
     var isGeotaggingEnabled: Boolean
         get() = prefs.getBoolean("saved_geotagging_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_geotagging_enabled", value).apply()
+
+    // ==========================================
+    // ADVANCED SETTINGS
+    // ==========================================
+    var jpegQuality: Int
+        get() = prefs.getInt("adv_jpeg_quality", 95)
+        set(value) = prefs.edit().putInt("adv_jpeg_quality", value).apply()
+
+    var isMirrorSelfie: Boolean
+        get() = prefs.getBoolean("adv_mirror_selfie", false)
+        set(value) = prefs.edit().putBoolean("adv_mirror_selfie", value).apply()
+
+    var cameraSoundMode: String
+        get() = prefs.getString("adv_camera_sound", "VIBRATE") ?: "VIBRATE"
+        set(value) = prefs.edit().putString("adv_camera_sound", value).apply()
+
+    var uiHapticsMode: String
+        get() = prefs.getString("adv_ui_haptics", "VIBRATE") ?: "VIBRATE"
+        set(value) = prefs.edit().putString("adv_ui_haptics", value).apply()
+
+    var tapAction: String
+        get() = prefs.getString("adv_tap_action", "FOCUS") ?: "FOCUS"
+        set(value) = prefs.edit().putString("adv_tap_action", value).apply()
+
+    var holdAction: String
+        get() = prefs.getString("adv_hold_action", "AE") ?: "AE"
+        set(value) = prefs.edit().putString("adv_hold_action", value).apply()
+
+    var volumeUpAction: String
+        get() = prefs.getString("adv_vol_up_action", "SHUTTER") ?: "SHUTTER"
+        set(value) = prefs.edit().putString("adv_vol_up_action", value).apply()
+
+    var volumeDownAction: String
+        get() = prefs.getString("adv_vol_down_action", "SHUTTER") ?: "SHUTTER"
+        set(value) = prefs.edit().putString("adv_vol_down_action", value).apply()
+
+    var antibandingMode: String
+        get() = prefs.getString("adv_antibanding", "AUTO") ?: "AUTO"
+        set(value) = prefs.edit().putString("adv_antibanding", value).apply()
+
+    var isUiBlurEnabled: Boolean
+        get() = prefs.getBoolean("adv_ui_blur", true)
+        set(value) = prefs.edit().putBoolean("adv_ui_blur", value).apply()
+
+    var isAutoUpdateCheckEnabled: Boolean
+        get() = prefs.getBoolean("adv_auto_update_check", true)
+        set(value) = prefs.edit().putBoolean("adv_auto_update_check", value).apply()
+
+    var isPreReleaseUpdateEnabled: Boolean
+        get() = prefs.getBoolean("adv_prerelease_update", true)
+        set(value) = prefs.edit().putBoolean("adv_prerelease_update", value).apply()
 }

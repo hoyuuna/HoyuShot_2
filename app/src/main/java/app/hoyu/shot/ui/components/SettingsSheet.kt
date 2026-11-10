@@ -45,6 +45,7 @@ fun SettingsDialog(
     onToggleHorizon: () -> Unit,
     onTogglePeaking: () -> Unit,
     onToggleZebra: () -> Unit,
+    onOpenAdvancedSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -65,7 +66,7 @@ fun SettingsDialog(
             Column(
                 modifier = Modifier
                     .width(320.dp)
-                    .heightIn(max = 280.dp)
+                    .heightIn(max = 340.dp)
                     .clip(shape)
                     .background(Color(0xF509090B)) // shadcn zinc-950
                     .border(1.dp, Color(0xFF27272A), shape)
@@ -318,6 +319,47 @@ fun SettingsDialog(
                         isActive = uiState.isZebraStripesEnabled,
                         onClick = onToggleZebra,
                         modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // 4. Advanced Settings Entry Button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF18181B))
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onOpenAdvancedSettings()
+                        }
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "NÂNG CAO // ADVANCED",
+                            color = Color(0xFFFAFAFA),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "JPEG, cử chỉ, phím âm lượng, antibanding & updater",
+                            color = Color(0xFF71717A),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Text(
+                        text = "MỞ >",
+                        color = Color(0xFFE11D48),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
             }

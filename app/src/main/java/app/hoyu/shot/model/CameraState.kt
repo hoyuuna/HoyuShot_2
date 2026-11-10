@@ -53,6 +53,9 @@ data class CameraUiState(
     val minZoomRatio: Float = 0.6f,
     val maxZoomRatio: Float = 30.0f,
 
+    // Per-Camera Internal Digital Zoom (1.0f to max, never jumps camera)
+    val digitalZoomRatio: Float = 1.0f,
+
     // Preview Dimensions & Aspect Ratio
     val aspectRatio: AspectRatio = AspectRatio.RATIO_4_3,
     val previewSize: Pair<Int, Int> = Pair(1920, 1440),
@@ -61,6 +64,10 @@ data class CameraUiState(
     val tapFocusPoint: TapFocusPoint? = null,
     val isAeLocked: Boolean = false,
     val isAfLocked: Boolean = false,
+
+    // Spot AE Metering (Independent of AF)
+    val tapAePoint: Offset? = null,
+    val isSpotAeActive: Boolean = false,
 
     // Manual Exposure Controls
     val exposureMode: ExposureMode = ExposureMode.AUTO,
@@ -105,6 +112,20 @@ data class CameraUiState(
     val isFocusPeakingEnabled: Boolean = false,
     val isZebraStripesEnabled: Boolean = false,
     val isGeotaggingEnabled: Boolean = false,
+
+    // Advanced Config States
+    val jpegQuality: Int = 95,
+    val isMirrorSelfie: Boolean = false,
+    val cameraSoundMode: String = "VIBRATE",
+    val uiHapticsMode: String = "VIBRATE",
+    val tapAction: String = "FOCUS",
+    val holdAction: String = "AE",
+    val volumeUpAction: String = "SHUTTER",
+    val volumeDownAction: String = "SHUTTER",
+    val antibandingMode: String = "AUTO",
+    val isUiBlurEnabled: Boolean = true,
+    val isAutoUpdateCheckEnabled: Boolean = true,
+    val isPreReleaseUpdateEnabled: Boolean = true,
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),

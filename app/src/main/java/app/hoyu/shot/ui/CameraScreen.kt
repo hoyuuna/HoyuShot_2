@@ -17,8 +17,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -75,6 +77,7 @@ fun CameraScreen(
 
     var isModeModalVisible by remember { mutableStateOf(false) }
     var isSettingsDialogVisible by remember { mutableStateOf(false) }
+    var isAdvancedSettingsVisible by remember { mutableStateOf(false) }
     var isFormatMenuVisible by remember { mutableStateOf(false) }
     var activeParamMenu by remember { mutableStateOf<DialParameter?>(null) }
     // Maintain last non-null parameter card so the exit animation (scale + fade) renders smoothly
@@ -87,10 +90,11 @@ fun CameraScreen(
 
     // Intercept system Back button so it navigates internally inside the app
     BackHandler(
-        enabled = uiState.isGalleryVisible || activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible
+        enabled = uiState.isGalleryVisible || activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
     ) {
         when {
             uiState.isGalleryVisible -> viewModel.closeGallery()
+            isAdvancedSettingsVisible -> isAdvancedSettingsVisible = false
             activeParamMenu != null -> activeParamMenu = null
             isFormatMenuVisible -> isFormatMenuVisible = false
             isModeModalVisible -> isModeModalVisible = false
@@ -139,20 +143,13 @@ fun CameraScreen(
         val leftoverHeight = maxHeight - previewHeightEstimate
         val isOverlayNeeded = leftoverHeight < 210.dp
 
-        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible
-        val popupBlurRadius by animateDpAsState(
-            targetValue = if (isAnyPopupOpen) 20.dp else 0.dp,
-            animationSpec = tween(220),
-            label = "popupBlur"
-        )
+        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
 
         // ==========================================
-        // MAIN VIEWPORT STRUCTURE (Blurred when popups open)
+        // MAIN VIEWPORT STRUCTURE (Never blurred!)
         // ==========================================
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(if (popupBlurRadius > 0.dp) Modifier.blur(popupBlurRadius) else Modifier)
+            modifier = Modifier.fillMaxSize()
         ) {
             if (!isOverlayNeeded) {
                 // 4:3 / 1:1 Layout: Clean Column (TopBar -> Preview -> BottomControls in black margin)
@@ -198,14 +195,20 @@ fun CameraScreen(
                             onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
                             onSurfaceDestroyed = { viewModel.stopCamera() },
                             onSizeChanged = { previewContainerSize = it },
-                            onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                            onZoomChanged = { zoom -> viewModel.onPinchZoom(zoom) },
                             onSwipeToGallery = { viewModel.openGallery() },
-                            onTouchFocus = { offset ->
+                            onTouchTap = { offset ->
                                 activeParamMenu = null
                                 isFormatMenuVisible = false
-                                viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                                viewModel.handleScreenTap(offset, previewContainerSize.width, previewContainerSize.height)
+                            },
+                            onTouchHold = { offset ->
+                                activeParamMenu = null
+                                isFormatMenuVisible = false
+                                viewModel.handleScreenHold(offset, previewContainerSize.width, previewContainerSize.height)
                             },
                             onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetDigitalZoom = { viewModel.resetDigitalZoom() },
                             onResetEv = { viewModel.setEvCompensation(0) }
                         )
                     }
@@ -234,7 +237,8 @@ fun CameraScreen(
                             onToggleFlash = { viewModel.toggleFlash() },
                             onEvChanged = { viewModel.setEvCompensation(it) },
                             onResetEv = { viewModel.setEvCompensation(0) },
-                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetDigitalZoom = { viewModel.resetDigitalZoom() }
                         )
                     }
                 }
@@ -257,14 +261,20 @@ fun CameraScreen(
                             onSurfaceCreated = { surface -> viewModel.startCamera(surface) },
                             onSurfaceDestroyed = { viewModel.stopCamera() },
                             onSizeChanged = { previewContainerSize = it },
-                            onZoomChanged = { zoom -> viewModel.setZoomRatio(uiState.currentZoomRatio * zoom) },
+                            onZoomChanged = { zoom -> viewModel.onPinchZoom(zoom) },
                             onSwipeToGallery = { viewModel.openGallery() },
-                            onTouchFocus = { offset ->
+                            onTouchTap = { offset ->
                                 activeParamMenu = null
                                 isFormatMenuVisible = false
-                                viewModel.onTouchFocus(offset, previewContainerSize.width, previewContainerSize.height)
+                                viewModel.handleScreenTap(offset, previewContainerSize.width, previewContainerSize.height)
+                            },
+                            onTouchHold = { offset ->
+                                activeParamMenu = null
+                                isFormatMenuVisible = false
+                                viewModel.handleScreenHold(offset, previewContainerSize.width, previewContainerSize.height)
                             },
                             onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetDigitalZoom = { viewModel.resetDigitalZoom() },
                             onResetEv = { viewModel.setEvCompensation(0) }
                         )
                     }
@@ -323,7 +333,8 @@ fun CameraScreen(
                             onToggleFlash = { viewModel.toggleFlash() },
                             onEvChanged = { viewModel.setEvCompensation(it) },
                             onResetEv = { viewModel.setEvCompensation(0) },
-                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
+                            onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) },
+                            onResetDigitalZoom = { viewModel.resetDigitalZoom() }
                         )
                     }
                 }
@@ -348,6 +359,7 @@ fun CameraScreen(
                         isFormatMenuVisible = false
                         isModeModalVisible = false
                         isSettingsDialogVisible = false
+                        isAdvancedSettingsVisible = false
                     }
             )
         }
@@ -494,8 +506,31 @@ fun CameraScreen(
             onToggleHorizon = { viewModel.toggleHorizon() },
             onTogglePeaking = { viewModel.toggleFocusPeaking() },
             onToggleZebra = { viewModel.toggleZebraStripes() },
+            onOpenAdvancedSettings = {
+                isSettingsDialogVisible = false
+                isAdvancedSettingsVisible = true
+            },
             onDismiss = { isSettingsDialogVisible = false },
             modifier = Modifier.align(Alignment.Center)
+        )
+
+        // Advanced Settings Dialog (Fixed Portrait Only, Nothing OS / shadcn)
+        AdvancedSettingsDialog(
+            visible = isAdvancedSettingsVisible,
+            uiState = uiState,
+            onJpegQualityChanged = { viewModel.setJpegQuality(it) },
+            onToggleMirrorSelfie = { viewModel.toggleMirrorSelfie() },
+            onAntibandingChanged = { viewModel.setAntibandingMode(it) },
+            onTapActionChanged = { viewModel.setTapAction(it) },
+            onHoldActionChanged = { viewModel.setHoldAction(it) },
+            onVolumeUpActionChanged = { viewModel.setVolumeUpAction(it) },
+            onVolumeDownActionChanged = { viewModel.setVolumeDownAction(it) },
+            onCameraSoundChanged = { viewModel.setCameraSoundMode(it) },
+            onUiHapticsChanged = { viewModel.setUiHapticsMode(it) },
+            onToggleUiBlur = { viewModel.toggleUiBlur() },
+            onToggleAutoUpdateCheck = { viewModel.toggleAutoUpdateCheck() },
+            onTogglePreReleaseUpdate = { viewModel.togglePreReleaseUpdate() },
+            onDismiss = { isAdvancedSettingsVisible = false }
         )
 
         // ProShot-style Gallery Viewer (Animated with swipe direction)
@@ -644,8 +679,10 @@ private fun ViewfinderPreviewContent(
     onSizeChanged: (IntSize) -> Unit,
     onZoomChanged: (Float) -> Unit,
     onSwipeToGallery: () -> Unit,
-    onTouchFocus: (androidx.compose.ui.geometry.Offset) -> Unit,
+    onTouchTap: (androidx.compose.ui.geometry.Offset) -> Unit,
+    onTouchHold: (androidx.compose.ui.geometry.Offset) -> Unit,
     onSelectLens: (LensItem) -> Unit,
+    onResetDigitalZoom: () -> Unit,
     onResetEv: () -> Unit
 ) {
     val view = LocalView.current
@@ -655,7 +692,7 @@ private fun ViewfinderPreviewContent(
             .fillMaxSize()
             .clipToBounds()
             .onSizeChanged { onSizeChanged(it) }
-            .pointerInput(uiState.currentZoomRatio) {
+            .pointerInput(uiState.digitalZoomRatio) {
                 detectTransformGestures { _, _, zoom, _ ->
                     if (zoom != 1.0f) {
                         onZoomChanged(zoom)
@@ -678,7 +715,9 @@ private fun ViewfinderPreviewContent(
                         }
                         accumulator += userHorizontalDrag
                         if (accumulator > 50f) {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            if (uiState.uiHapticsMode == "VIBRATE") {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
                             accumulator = 0f
                             onSwipeToGallery()
                         }
@@ -686,10 +725,20 @@ private fun ViewfinderPreviewContent(
                 )
             }
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    onTouchFocus(offset)
-                }
+                detectTapGestures(
+                    onTap = { offset ->
+                        if (uiState.uiHapticsMode == "VIBRATE") {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        }
+                        onTouchTap(offset)
+                    },
+                    onLongPress = { offset ->
+                        if (uiState.uiHapticsMode == "VIBRATE") {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
+                        onTouchHold(offset)
+                    }
+                )
             },
         contentAlignment = Alignment.Center
     ) {
@@ -737,6 +786,9 @@ private fun ViewfinderPreviewContent(
 
         // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
+
+        // Spot AE Metering Reticle (Shows independently from AF)
+        SpotAeRingOverlay(tapPoint = uiState.tapAePoint, rotationDegrees = animatedRotation)
 
         val hasLensSwitcherInPreview = uiState.availableLenses.size > 1 && uiState.aspectRatio != AspectRatio.RATIO_16_9
 
@@ -795,21 +847,28 @@ private fun ViewfinderPreviewContent(
             }
         }
 
-        // Bottom Inside Preview: Lens Switcher (0.6x, 1x, 3.2x horizontally)
+        // Bottom Inside Preview: Lens Switcher (0.6x, 1x, 3.2x, 5x, etc. horizontally)
         // In 16:9, lens switcher is placed next to the parameter strip instead of bottom center
         if (uiState.availableLenses.size > 1 && uiState.aspectRatio != AspectRatio.RATIO_16_9) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 12.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
                     val isSelected = uiState.currentLens?.id == lens.id
+                    val displayLabel = if (isSelected && uiState.digitalZoomRatio > 1.05f) {
+                        String.format(java.util.Locale.US, "%.1fx", lens.zoomRatio * uiState.digitalZoomRatio)
+                    } else {
+                        lens.label
+                    }
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .height(36.dp)
+                            .defaultMinSize(minWidth = 36.dp)
                             .clip(shape)
                             .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
                             .border(
@@ -818,13 +877,20 @@ private fun ViewfinderPreviewContent(
                                 shape
                             )
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                onSelectLens(lens)
-                            },
+                                if (uiState.uiHapticsMode == "VIBRATE") {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                }
+                                if (isSelected && uiState.digitalZoomRatio > 1.05f) {
+                                    onResetDigitalZoom()
+                                } else {
+                                    onSelectLens(lens)
+                                }
+                            }
+                            .padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = lens.label,
+                            text = displayLabel,
                             color = if (isSelected) Color.Black else Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -856,7 +922,8 @@ private fun BottomControlsContent(
     onToggleFlash: () -> Unit,
     onEvChanged: (Int) -> Unit,
     onResetEv: () -> Unit,
-    onSelectLens: (LensItem) -> Unit
+    onSelectLens: (LensItem) -> Unit,
+    onResetDigitalZoom: () -> Unit = {}
 ) {
     val view = LocalView.current
     var isBursting by remember { mutableStateOf(false) }
@@ -873,14 +940,21 @@ private fun BottomControlsContent(
         // In 16:9, place Lens Switcher right above/beside the parameter strip so Shutter doesn't cover it
         if (uiState.aspectRatio == AspectRatio.RATIO_16_9 && uiState.availableLenses.size > 1) {
             Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
                     val isSelected = uiState.currentLens?.id == lens.id
+                    val displayLabel = if (isSelected && uiState.digitalZoomRatio > 1.05f) {
+                        String.format(java.util.Locale.US, "%.1fx", lens.zoomRatio * uiState.digitalZoomRatio)
+                    } else {
+                        lens.label
+                    }
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .height(34.dp)
+                            .defaultMinSize(minWidth = 34.dp)
                             .clip(shape)
                             .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
                             .border(
@@ -889,13 +963,20 @@ private fun BottomControlsContent(
                                 shape
                             )
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                onSelectLens(lens)
-                            },
+                                if (uiState.uiHapticsMode == "VIBRATE") {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                }
+                                if (isSelected && uiState.digitalZoomRatio > 1.05f) {
+                                    onResetDigitalZoom()
+                                } else {
+                                    onSelectLens(lens)
+                                }
+                            }
+                            .padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = lens.label,
+                            text = displayLabel,
                             color = if (isSelected) Color.Black else Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,

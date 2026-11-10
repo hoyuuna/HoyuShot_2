@@ -141,6 +141,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             settingsRepo.isGeotaggingEnabled = false
         }
         cameraController.isGeotaggingEnabled = initGeo
+        cameraController.jpegQuality = settingsRepo.jpegQuality
+        cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
+        cameraController.antibandingMode = settingsRepo.antibandingMode
+        cameraController.cameraSoundMode = settingsRepo.cameraSoundMode
 
         _uiState.update {
             it.copy(
@@ -148,6 +152,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 currentLens = defaultLens,
                 currentCameraId = initialCameraId,
                 currentZoomRatio = defaultLens?.zoomRatio ?: 1.0f,
+                digitalZoomRatio = 1.0f,
                 minZoomRatio = minZoom,
                 maxZoomRatio = maxZoom,
                 capabilities = caps,
@@ -171,8 +176,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isHorizonLevelVisible = initHorizon,
                 isFocusPeakingEnabled = initPeaking,
                 isZebraStripesEnabled = initZebra,
-                isGeotaggingEnabled = initGeo
+                isGeotaggingEnabled = initGeo,
+                jpegQuality = settingsRepo.jpegQuality,
+                isMirrorSelfie = settingsRepo.isMirrorSelfie,
+                cameraSoundMode = settingsRepo.cameraSoundMode,
+                uiHapticsMode = settingsRepo.uiHapticsMode,
+                tapAction = settingsRepo.tapAction,
+                holdAction = settingsRepo.holdAction,
+                volumeUpAction = settingsRepo.volumeUpAction,
+                volumeDownAction = settingsRepo.volumeDownAction,
+                antibandingMode = settingsRepo.antibandingMode,
+                isUiBlurEnabled = settingsRepo.isUiBlurEnabled,
+                isAutoUpdateCheckEnabled = settingsRepo.isAutoUpdateCheckEnabled,
+                isPreReleaseUpdateEnabled = settingsRepo.isPreReleaseUpdateEnabled
             )
+        }
+
+        // Background auto-check for updates on app boot
+        if (settingsRepo.isAutoUpdateCheckEnabled) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val updateManager = app.hoyu.shot.updater.UpdateManager(application)
+                    val result = updateManager.checkForUpdates(includePreRelease = settingsRepo.isPreReleaseUpdateEnabled)
+                    if (result is app.hoyu.shot.updater.UpdateCheckResult.UpdateAvailable) {
+                        updateManager.showUpdateNotification(result.info)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
     }
 
@@ -248,6 +280,52 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun cancelTouchFocus() {
         _uiState.update { it.copy(tapFocusPoint = null, isAfLocked = false) }
         cameraController.resetAutoFocus()
+    }
+
+    fun onTouchAe(offset: Offset, viewWidth: Int, viewHeight: Int) {
+        if (viewWidth <= 0 || viewHeight <= 0) return
+
+        val existingAe = _uiState.value.tapAePoint
+        if (existingAe != null) {
+            val dx = offset.x - existingAe.x
+            val dy = offset.y - existingAe.y
+            val dist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            if (dist < 110f) {
+                cancelTouchAe()
+                return
+            }
+        }
+
+        val normX = (offset.x / viewWidth).coerceIn(0f, 1f)
+        val normY = (offset.y / viewHeight).coerceIn(0f, 1f)
+
+        _uiState.update {
+            it.copy(tapAePoint = offset, isSpotAeActive = true)
+        }
+        cameraController.triggerSpotAe(normX, normY)
+    }
+
+    fun cancelTouchAe() {
+        _uiState.update { it.copy(tapAePoint = null, isSpotAeActive = false) }
+        cameraController.triggerSpotAe(null, null)
+    }
+
+    fun handleScreenTap(offset: Offset, viewWidth: Int, viewHeight: Int) {
+        when (_uiState.value.tapAction.uppercase()) {
+            "FOCUS" -> onTouchFocus(offset, viewWidth, viewHeight)
+            "AE" -> onTouchAe(offset, viewWidth, viewHeight)
+            "SHUTTER" -> takePicture()
+            else -> {}
+        }
+    }
+
+    fun handleScreenHold(offset: Offset, viewWidth: Int, viewHeight: Int) {
+        when (_uiState.value.holdAction.uppercase()) {
+            "AE" -> onTouchAe(offset, viewWidth, viewHeight)
+            "FOCUS" -> onTouchFocus(offset, viewWidth, viewHeight)
+            "SHUTTER" -> takePicture()
+            else -> {}
+        }
     }
 
     fun toggleResumeSettings() {
@@ -517,9 +595,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 currentLens = lens,
-                currentZoomRatio = lens.zoomRatio
+                currentZoomRatio = lens.zoomRatio,
+                digitalZoomRatio = 1.0f
             )
         }
+        cameraController.currentZoomRatio = 1.0f
 
         if (lens.cameraId != currentCamId) {
             val caps = inspector.inspectCamera(lens.cameraId)
@@ -548,10 +628,129 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applyCurrentSettings()
     }
 
+    fun onPinchZoom(zoomMultiplier: Float) {
+        val currentDigital = _uiState.value.digitalZoomRatio
+        // Strictly internal to current camera sensor: minimum is 1.0f (never switches to wider lens)
+        val newDigital = (currentDigital * zoomMultiplier).coerceIn(1.0f, 10.0f)
+        _uiState.update { it.copy(digitalZoomRatio = newDigital) }
+        cameraController.currentZoomRatio = newDigital
+        applyCurrentSettings()
+    }
+
+    fun resetDigitalZoom() {
+        _uiState.update { it.copy(digitalZoomRatio = 1.0f) }
+        cameraController.currentZoomRatio = 1.0f
+        applyCurrentSettings()
+    }
+
+    fun stepZoom(factor: Float) {
+        val currentDigital = _uiState.value.digitalZoomRatio
+        val newDigital = (currentDigital * factor).coerceIn(1.0f, 10.0f)
+        _uiState.update { it.copy(digitalZoomRatio = newDigital) }
+        cameraController.currentZoomRatio = newDigital
+        applyCurrentSettings()
+    }
+
     fun setZoomRatio(zoom: Float) {
         val clamped = zoom.coerceIn(_uiState.value.minZoomRatio, _uiState.value.maxZoomRatio)
         _uiState.update { it.copy(currentZoomRatio = clamped) }
         applyCurrentSettings()
+    }
+
+    fun handleVolumeKey(isUp: Boolean): Boolean {
+        val action = if (isUp) _uiState.value.volumeUpAction else _uiState.value.volumeDownAction
+        return when (action.uppercase()) {
+            "SHUTTER" -> {
+                takePicture()
+                true
+            }
+            "AE_LOCK" -> {
+                toggleAeLock()
+                true
+            }
+            "EV" -> {
+                val step = if (isUp) 1 else -1
+                val newEv = _uiState.value.evCompensationIndex + step
+                val minEv = _uiState.value.capabilities?.evCompensationRange?.lower ?: -6
+                val maxEv = _uiState.value.capabilities?.evCompensationRange?.upper ?: 6
+                setEvCompensation(newEv.coerceIn(minEv, maxEv))
+                true
+            }
+            "ZOOM" -> {
+                stepZoom(if (isUp) 1.25f else 0.8f)
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun setJpegQuality(quality: Int) {
+        _uiState.update { it.copy(jpegQuality = quality) }
+        settingsRepo.jpegQuality = quality
+        cameraController.jpegQuality = quality
+    }
+
+    fun toggleMirrorSelfie() {
+        val next = !_uiState.value.isMirrorSelfie
+        _uiState.update { it.copy(isMirrorSelfie = next) }
+        settingsRepo.isMirrorSelfie = next
+        cameraController.isMirrorSelfie = next
+    }
+
+    fun setAntibandingMode(mode: String) {
+        _uiState.update { it.copy(antibandingMode = mode) }
+        settingsRepo.antibandingMode = mode
+        cameraController.antibandingMode = mode
+        applyCurrentSettings()
+    }
+
+    fun setTapAction(action: String) {
+        _uiState.update { it.copy(tapAction = action) }
+        settingsRepo.tapAction = action
+    }
+
+    fun setHoldAction(action: String) {
+        _uiState.update { it.copy(holdAction = action) }
+        settingsRepo.holdAction = action
+    }
+
+    fun setVolumeUpAction(action: String) {
+        _uiState.update { it.copy(volumeUpAction = action) }
+        settingsRepo.volumeUpAction = action
+    }
+
+    fun setVolumeDownAction(action: String) {
+        _uiState.update { it.copy(volumeDownAction = action) }
+        settingsRepo.volumeDownAction = action
+    }
+
+    fun setCameraSoundMode(mode: String) {
+        _uiState.update { it.copy(cameraSoundMode = mode) }
+        settingsRepo.cameraSoundMode = mode
+        cameraController.cameraSoundMode = mode
+    }
+
+    fun setUiHapticsMode(mode: String) {
+        _uiState.update { it.copy(uiHapticsMode = mode) }
+        settingsRepo.uiHapticsMode = mode
+    }
+
+    fun toggleUiBlur() {
+        val next = !_uiState.value.isUiBlurEnabled
+        _uiState.update { it.copy(isUiBlurEnabled = next) }
+        settingsRepo.isUiBlurEnabled = next
+    }
+
+    fun toggleAutoUpdateCheck() {
+        val next = !_uiState.value.isAutoUpdateCheckEnabled
+        _uiState.update { it.copy(isAutoUpdateCheckEnabled = next) }
+        settingsRepo.isAutoUpdateCheckEnabled = next
+    }
+
+    fun togglePreReleaseUpdate() {
+        val next = !_uiState.value.isPreReleaseUpdateEnabled
+        _uiState.update { it.copy(isPreReleaseUpdateEnabled = next) }
+        settingsRepo.isPreReleaseUpdateEnabled = next
     }
 
     fun toggleCameraFacing() {

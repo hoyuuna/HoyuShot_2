@@ -132,3 +132,88 @@ fun FocusRingOverlay(
         }
     }
 }
+
+@Composable
+fun SpotAeRingOverlay(
+    tapPoint: Offset?,
+    rotationDegrees: Float = 0f,
+    modifier: Modifier = Modifier
+) {
+    if (tapPoint == null) return
+
+    val animatedScale = remember { Animatable(1.3f) }
+
+    LaunchedEffect(tapPoint) {
+        animatedScale.snapTo(1.3f)
+        animatedScale.animateTo(
+            targetValue = 1.0f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
+        )
+    }
+
+    val reticleColor = Color(0xFFE11D48) // Nothing Red for AE Lock/Spot
+
+    Box(modifier = modifier.fillMaxSize()) {
+        val ringSize = 72.dp
+        Box(
+            modifier = Modifier
+                .size(ringSize)
+                .offset {
+                    IntOffset(
+                        (tapPoint.x - (ringSize.toPx() / 2)).roundToInt(),
+                        (tapPoint.y - (ringSize.toPx() / 2)).roundToInt()
+                    )
+                },
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val currentScale = animatedScale.value
+                val radius = (size.width / 2f - 4f) * currentScale
+
+                // Four corner brackets for AE
+                val halfSide = radius * 0.92f
+                val cornerLen = halfSide * 0.38f
+                val strokeW = 2.5f
+
+                // Top-Left Corner
+                drawLine(reticleColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide + cornerLen, center.y - halfSide), strokeW)
+                drawLine(reticleColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide, center.y - halfSide + cornerLen), strokeW)
+
+                // Top-Right Corner
+                drawLine(reticleColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide - cornerLen, center.y - halfSide), strokeW)
+                drawLine(reticleColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide, center.y - halfSide + cornerLen), strokeW)
+
+                // Bottom-Left Corner
+                drawLine(reticleColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide + cornerLen, center.y + halfSide), strokeW)
+                drawLine(reticleColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide, center.y + halfSide - cornerLen), strokeW)
+
+                // Bottom-Right Corner
+                drawLine(reticleColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
+                drawLine(reticleColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
+            }
+
+            // Monospace "AE" Text badge in the center
+            Box(
+                modifier = Modifier
+                    .androidx.compose.ui.draw.rotate(rotationDegrees)
+                    .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                    .androidx.compose.foundation.background(Color(0xBB000000))
+                    .androidx.compose.foundation.border(1.dp, Color(0xFFE11D48), androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                    .androidx.compose.foundation.layout.padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                androidx.compose.material3.Text(
+                    text = "AE",
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 10.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+    }
+}

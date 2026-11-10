@@ -111,7 +111,7 @@ class CameraHardwareInspector(private val context: Context) {
         // Generate clean optical labels for Back cameras
         for (sensor in backSensors) {
             val ratio = sensor.focal35mm / primary35mm
-            val label = when {
+            var label = when {
                 // Ultra-wide (e.g. 15mm on Xiaomi 13 -> 15/23 = 0.65 -> 0.6x)
                 ratio in 0.5f..0.75f -> "0.6x"
                 ratio in 0.4f..0.49f -> "0.5x"
@@ -125,18 +125,39 @@ class CameraHardwareInspector(private val context: Context) {
                 ratio in 4.5f..5.5f -> "5x"
                 // 10x Periscope (~240mm)
                 ratio in 8.5f..11.0f -> "10x"
-                ratio < 1.0f -> String.format("%.1fx", ratio)
+                ratio < 1.0f -> String.format(java.util.Locale.US, "%.1fx", ratio)
                 else -> "${(ratio * 10f).roundToInt() / 10f}x"
             }
 
-            // Deduplicate if multiple logical IDs point to the same focal length
-            if (!lenses.any { it.label == label }) {
+            var baseZoomRatio = when (label) {
+                "0.5x" -> 0.5f
+                "0.6x" -> 0.6f
+                "1x" -> 1.0f
+                "2x" -> 2.0f
+                "3.2x" -> 3.2f
+                "5x" -> 5.0f
+                "10x" -> 10.0f
+                else -> (ratio * 10f).roundToInt() / 10f
+            }
+
+            // Deduplicate only if identical logical alias; if it's a distinct physical camera, preserve it
+            if (lenses.any { it.label == label }) {
+                val candidateLabel = String.format(java.util.Locale.US, "%.1fx", ratio)
+                if (!lenses.any { it.label == candidateLabel }) {
+                    label = candidateLabel
+                    baseZoomRatio = ratio
+                } else {
+                    label = "$label [ID ${sensor.id}]"
+                }
+            }
+
+            if (!lenses.any { it.cameraId == sensor.id }) {
                 lenses.add(
                     LensItem(
                         id = "sensor_${sensor.id}_$label",
                         label = label,
                         cameraId = sensor.id,
-                        zoomRatio = 1.0f,
+                        zoomRatio = baseZoomRatio,
                         isFront = false
                     )
                 )
