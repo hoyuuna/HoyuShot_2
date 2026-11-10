@@ -78,4 +78,8 @@ class SettingsRepository(context: Context) {
     var savedZebraEnabled: Boolean
         get() = prefs.getBoolean("saved_zebra_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_zebra_enabled", value).apply()
+
+    var isGeotaggingEnabled: Boolean
+        get() = prefs.getBoolean("saved_geotagging_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_geotagging_enabled", value).apply()
 }

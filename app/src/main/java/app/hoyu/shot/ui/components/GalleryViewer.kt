@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -354,24 +355,10 @@ private fun ZoomablePhotoItem(
         }
     }
 
-    var targetScale by remember { mutableStateOf(1f) }
-    var targetOffset by remember { mutableStateOf(Offset.Zero) }
-
-    val animatedScale by animateFloatAsState(
-        targetValue = targetScale,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "photoScale"
-    )
-    val animatedOffsetX by animateFloatAsState(
-        targetValue = targetOffset.x,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "photoOffsetX"
-    )
-    val animatedOffsetY by animateFloatAsState(
-        targetValue = targetOffset.y,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "photoOffsetY"
-    )
+    val scaleAnim = remember { Animatable(1f) }
+    val offsetXAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -380,30 +367,35 @@ private fun ZoomablePhotoItem(
                 // Double tap to zoom in / reset to 1x with smooth spring animation
                 detectTapGestures(
                     onDoubleTap = {
-                        if (targetScale > 1.1f) {
-                            targetScale = 1f
-                            targetOffset = Offset.Zero
-                        } else {
-                            targetScale = 2.5f
-                            targetOffset = Offset.Zero
+                        coroutineScope.launch {
+                            if (scaleAnim.value > 1.1f) {
+                                launch { scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMedium)) }
+                                launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                            } else {
+                                launch { scaleAnim.animateTo(2.5f, spring(stiffness = Spring.StiffnessMedium)) }
+                                launch { offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                                launch { offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium)) }
+                            }
                         }
                     },
                     onTap = { onToggleChrome() }
                 )
             }
-            .pointerInput(targetScale) {
-                // Only intercept drag gestures when zoomed in!
-                // When at 1x, do NOT intercept so HorizontalPager swipes freely to older/newer photos!
-                if (targetScale > 1.05f) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val newScale = (targetScale * zoom).coerceIn(1f, 5f)
-                        targetScale = newScale
-                        val maxPanX = (newScale - 1f) * size.width / 2f
-                        val maxPanY = (newScale - 1f) * size.height / 2f
-                        targetOffset = Offset(
-                            (targetOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
-                            (targetOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
-                        )
+            .pointerInput(Unit) {
+                // 1:1 Instant finger-tracking pinch-to-zoom (zero spring delay)
+                detectTransformGestures { _, pan, zoom, _ ->
+                    if (zoom != 1f || scaleAnim.value > 1.05f) {
+                        coroutineScope.launch {
+                            val newScale = (scaleAnim.value * zoom).coerceIn(1f, 5f)
+                            scaleAnim.snapTo(newScale)
+                            val maxPanX = (newScale - 1f) * size.width / 2f
+                            val maxPanY = (newScale - 1f) * size.height / 2f
+                            val newX = (offsetXAnim.value + pan.x).coerceIn(-maxPanX, maxPanX)
+                            val newY = (offsetYAnim.value + pan.y).coerceIn(-maxPanY, maxPanY)
+                            offsetXAnim.snapTo(newX)
+                            offsetYAnim.snapTo(newY)
+                        }
                     }
                 }
             },
@@ -417,10 +409,10 @@ private fun ZoomablePhotoItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer(
-                        scaleX = animatedScale,
-                        scaleY = animatedScale,
-                        translationX = animatedOffsetX,
-                        translationY = animatedOffsetY
+                        scaleX = scaleAnim.value,
+                        scaleY = scaleAnim.value,
+                        translationX = offsetXAnim.value,
+                        translationY = offsetYAnim.value
                     ),
                 contentScale = ContentScale.Fit
             )

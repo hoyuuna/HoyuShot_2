@@ -82,7 +82,7 @@ fun <T> ParameterGridMenu(
             Column(
                 modifier = Modifier
                     .width(320.dp)
-                    .heightIn(max = 280.dp)
+                    .heightIn(max = 340.dp)
                     .clip(shape)
                     .background(Color(0xF509090B)) // shadcn zinc-950
                     .border(1.dp, Color(0xFF27272A), shape)
@@ -114,82 +114,84 @@ fun <T> ParameterGridMenu(
                     )
                 }
 
-                // 1. "AUTO TRÊN CÙNG TO NHẤT": Prominent wide card styled exactly like Resume Settings
-                val autoBgColor by animateColorAsState(
-                    targetValue = if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B),
-                    label = "autoBg"
-                )
-                val autoBorderColor by animateColorAsState(
-                    targetValue = if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A),
-                    label = "autoBorder"
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .background(autoBgColor)
-                        .border(1.dp, autoBorderColor, shape)
-                        .clickable {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            touchReleaseEpoch = System.currentTimeMillis()
-                            onAutoSelected()
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "AUTO METERING",
-                            color = if (isAutoSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Automatic hardware metering & calculation",
-                            color = Color(0xFF71717A),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    // Animated ON / OFF Pill
-                    Box(
-                        modifier = Modifier
-                            .clip(shape)
-                            .background(if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isAutoSelected) "ON" else "OFF",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // 2. "CUSTOM Ở DƯỚI NHỎ HƠN VÀ CÓ ANIMATION": Grid of smaller cards
-                Text(
-                    text = "MANUAL PRESETS",
-                    color = Color(0xFF71717A),
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
-                )
-
-                // 2-Column layout of smaller cards with smooth animated selection
+                // Scrollable container: Entire list (AUTO METERING + MANUAL PRESETS) scrolls together
                 Column(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .weight(1f, fill = false)
                         .verticalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // 1. "AUTO TRÊN CÙNG TO NHẤT": Prominent wide card styled exactly like Resume Settings
+                    val autoBgColor by animateColorAsState(
+                        targetValue = if (isAutoSelected) Color(0x33E11D48) else Color(0xFF18181B),
+                        label = "autoBg"
+                    )
+                    val autoBorderColor by animateColorAsState(
+                        targetValue = if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                        label = "autoBorder"
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .background(autoBgColor)
+                            .border(1.dp, autoBorderColor, shape)
+                            .clickable {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                touchReleaseEpoch = System.currentTimeMillis()
+                                onAutoSelected()
+                            }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "AUTO METERING",
+                                color = if (isAutoSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Automatic hardware metering & calculation",
+                                color = Color(0xFF71717A),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        // Animated ON / OFF Pill
+                        Box(
+                            modifier = Modifier
+                                .clip(shape)
+                                .background(if (isAutoSelected) Color(0xFFE11D48) else Color(0xFF27272A))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isAutoSelected) "ON" else "OFF",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    // 2. "CUSTOM Ở DƯỚI NHỎ HƠN VÀ CÓ ANIMATION": Grid of smaller cards
+                    Text(
+                        text = "MANUAL PRESETS",
+                        color = Color(0xFF71717A),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+
+                    // 2-Column layout of smaller cards with smooth animated selection
                     val chunkedItems = items.chunked(2)
                     chunkedItems.forEach { pair ->
                         Row(

@@ -16,8 +16,10 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import androidx.exifinterface.media.ExifInterface
 import app.hoyu.shot.camera.analyzer.HistogramAnalyzer
 import app.hoyu.shot.model.*
+import app.hoyu.shot.sensors.LocationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,6 +56,10 @@ class Camera2Controller(
     private var isCapturing = false
     private var isAeLocked = false
     private var isAfLocked = false
+
+    var isGeotaggingEnabled = false
+    var onExposureCompleted: (() -> Unit)? = null
+    private val locationHelper = LocationHelper(context)
 
     var currentExposureMode = ExposureMode.AUTO
     var currentIso = 100
@@ -200,7 +206,7 @@ class Camera2Controller(
         }
 
         jpegImageReader = ImageReader.newInstance(
-            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 2
+            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 8
         ).apply {
             setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
@@ -216,7 +222,7 @@ class Camera2Controller(
         val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
         if (largestRaw != null) {
             rawImageReader = ImageReader.newInstance(
-                largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 2
+                largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 8
             )
         }
     }
@@ -573,6 +579,14 @@ class Camera2Controller(
             lastJpegOrientation = jpegOrientation
             captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
 
+            // Geotagging GPS: Set hardware GPS location on CaptureRequest
+            if (isGeotaggingEnabled) {
+                val loc = locationHelper.getLastKnownLocation()
+                if (loc != null) {
+                    captureBuilder.set(CaptureRequest.JPEG_GPS_LOCATION, loc)
+                }
+            }
+
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
                     session: CameraCaptureSession,
@@ -592,6 +606,7 @@ class Camera2Controller(
                     }
 
                     isCapturing = false
+                    onExposureCompleted?.invoke()
                 }
 
                 override fun onCaptureFailed(
@@ -632,6 +647,22 @@ class Camera2Controller(
                 buffer.get(bytes)
                 outputStream.write(bytes)
                 writtenBytes = bytes.size.toLong()
+            }
+
+            // Fallback guarantee: embed GPS EXIF if enabled
+            if (isGeotaggingEnabled) {
+                val loc = locationHelper.getLastKnownLocation()
+                if (loc != null) {
+                    try {
+                        context.contentResolver.openFileDescriptor(destUri, "rw")?.use { pfd ->
+                            val exif = ExifInterface(pfd.fileDescriptor)
+                            exif.setGpsInfo(loc)
+                            exif.saveAttributes()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to write EXIF GPS", e)
+                    }
+                }
             }
 
             val chars = currentCharacteristics
@@ -680,6 +711,12 @@ class Camera2Controller(
             context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
                 val dngCreator = DngCreator(characteristics, captureResult)
                 dngCreator.setOrientation(lastJpegOrientation)
+                if (isGeotaggingEnabled) {
+                    val loc = locationHelper.getLastKnownLocation()
+                    if (loc != null) {
+                        dngCreator.setLocation(loc)
+                    }
+                }
                 dngCreator.writeImage(outputStream, image)
                 dngCreator.close()
             }

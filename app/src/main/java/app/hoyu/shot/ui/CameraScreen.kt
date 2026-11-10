@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.hoyu.shot.model.*
 import app.hoyu.shot.ui.components.*
+import kotlinx.coroutines.*
 
 @Composable
 fun CameraScreen(
@@ -198,7 +199,8 @@ fun CameraScreen(
                         onToggleFlip = { viewModel.toggleCameraFacing() },
                         onToggleFlash = { viewModel.toggleFlash() },
                         onEvChanged = { viewModel.setEvCompensation(it) },
-                        onResetEv = { viewModel.setEvCompensation(0) }
+                        onResetEv = { viewModel.setEvCompensation(0) },
+                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
                     )
                 }
             }
@@ -285,7 +287,8 @@ fun CameraScreen(
                         onToggleFlip = { viewModel.toggleCameraFacing() },
                         onToggleFlash = { viewModel.toggleFlash() },
                         onEvChanged = { viewModel.setEvCompensation(it) },
-                        onResetEv = { viewModel.setEvCompensation(0) }
+                        onResetEv = { viewModel.setEvCompensation(0) },
+                        onSelectLens = { lens: LensItem -> viewModel.selectLens(lens) }
                     )
                 }
             }
@@ -423,6 +426,7 @@ fun CameraScreen(
             uiState = uiState,
             rotationDegrees = animatedRotation,
             onToggleResumeSettings = { viewModel.toggleResumeSettings() },
+            onToggleGeotagging = { viewModel.toggleGeotagging() },
             onCycleNoiseReduction = { viewModel.cycleNoiseReduction() },
             onCycleSharpness = { viewModel.cycleSharpness() },
             onToggleHistogram = { viewModel.toggleHistogram() },
@@ -682,10 +686,10 @@ private fun ViewfinderPreviewContent(
                 else -> Alignment.BottomStart
             }
             val histPadding = when (uiState.uiRotationDegrees) {
-                90f -> Modifier.padding(start = 14.dp, top = 14.dp)
-                180f -> Modifier.padding(end = 14.dp, top = 14.dp)
-                270f -> Modifier.padding(end = 14.dp, bottom = 14.dp)
-                else -> Modifier.padding(start = 14.dp, bottom = 14.dp)
+                90f -> Modifier.padding(start = 14.dp, top = 76.dp)
+                180f -> Modifier.padding(end = 14.dp, top = 76.dp)
+                270f -> Modifier.padding(end = 14.dp, bottom = 76.dp)
+                else -> Modifier.padding(start = 14.dp, bottom = 76.dp)
             }
             Box(
                 modifier = Modifier
@@ -729,7 +733,8 @@ private fun ViewfinderPreviewContent(
         }
 
         // Bottom Inside Preview: Lens Switcher (0.6x, 1x, 3.2x horizontally)
-        if (uiState.availableLenses.size > 1) {
+        // In 16:9, lens switcher is placed next to the parameter strip instead of bottom center
+        if (uiState.availableLenses.size > 1 && uiState.aspectRatio != AspectRatio.RATIO_16_9) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -786,9 +791,13 @@ private fun BottomControlsContent(
     onToggleFlip: () -> Unit,
     onToggleFlash: () -> Unit,
     onEvChanged: (Int) -> Unit,
-    onResetEv: () -> Unit
+    onResetEv: () -> Unit,
+    onSelectLens: (LensItem) -> Unit
 ) {
     val view = LocalView.current
+    var isBursting by remember { mutableStateOf(false) }
+    var burstCount by remember { mutableStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -797,6 +806,43 @@ private fun BottomControlsContent(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // In 16:9, place Lens Switcher right above/beside the parameter strip so Shutter doesn't cover it
+        if (uiState.aspectRatio == AspectRatio.RATIO_16_9 && uiState.availableLenses.size > 1) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                uiState.availableLenses.filter { !it.isFront }.forEach { lens ->
+                    val isSelected = uiState.currentLens?.id == lens.id
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(shape)
+                            .background(if (isSelected) Color(0xFFFAFAFA) else Color(0x66000000))
+                            .border(
+                                1.dp,
+                                if (isSelected) Color(0xFFFAFAFA) else Color(0x66FFFFFF),
+                                shape
+                            )
+                            .clickable {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onSelectLens(lens)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = lens.label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.rotate(animatedRotation)
+                        )
+                    }
+                }
+            }
+        }
+
         // Row 1: Horizontal Parameter Strip (AF, SEC, ISO, WB)
         HorizontalParameterStrip(
             uiState = uiState,
@@ -841,34 +887,97 @@ private fun BottomControlsContent(
                 )
             }
 
-            // Shutter Button (White circle, thick Nothing Red border #E11D48, center red dot)
+            // Shutter Button with Burst Shooting (Hold >= 0.5s) & Exposure duration feedback
             Box(
-                modifier = Modifier
-                    .size(74.dp)
-                    .border(3.dp, Color(0xFFE11D48), CircleShape)
-                    .padding(5.dp)
-                    .background(
-                        if (uiState.isCapturing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
-                        CircleShape
-                    )
-                    .clickable(enabled = !uiState.isCapturing) {
-                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        onCapture()
-                    },
                 contentAlignment = Alignment.Center
             ) {
-                if (uiState.isCapturing) {
-                    CircularProgressIndicator(
-                        color = Color(0xFFE11D48),
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(28.dp)
-                    )
-                } else {
+                // Burst count indicator badge when burst shooting is active
+                AnimatedVisibility(
+                    visible = isBursting && burstCount > 0,
+                    enter = fadeIn(tween(100)) + scaleIn(tween(100)),
+                    exit = fadeOut(tween(150)) + scaleOut(tween(150)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(y = (-36).dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
-                            .background(Color(0xFFE11D48), CircleShape)
-                    )
+                            .clip(shape)
+                            .background(Color(0xFFE11D48))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "BURST // $burstCount",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.rotate(animatedRotation)
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(74.dp)
+                        .border(3.dp, Color(0xFFE11D48), CircleShape)
+                        .padding(5.dp)
+                        .background(
+                            if (uiState.isCapturing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
+                            CircleShape
+                        )
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    var isHolding = true
+                                    val startTime = System.currentTimeMillis()
+                                    var burstJob: Job? = null
+
+                                    burstJob = coroutineScope.launch {
+                                        delay(500)
+                                        if (isHolding) {
+                                            isBursting = true
+                                            burstCount = 0
+                                            while (isHolding) {
+                                                burstCount++
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                onCapture()
+                                                val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(120L, 800L)
+                                                delay(exposureMs)
+                                            }
+                                        }
+                                    }
+
+                                    tryAwaitRelease()
+                                    isHolding = false
+                                    val duration = System.currentTimeMillis() - startTime
+                                    burstJob.cancel()
+
+                                    if (!isBursting && duration < 500) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                        onCapture()
+                                    }
+
+                                    isBursting = false
+                                    burstCount = 0
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (uiState.isCapturing) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFE11D48),
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFFE11D48), CircleShape)
+                        )
+                    }
                 }
             }
 

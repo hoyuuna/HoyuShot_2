@@ -104,6 +104,7 @@ data class CameraUiState(
     val isHorizonLevelVisible: Boolean = true,
     val isFocusPeakingEnabled: Boolean = false,
     val isZebraStripesEnabled: Boolean = false,
+    val isGeotaggingEnabled: Boolean = false,
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),

@@ -38,6 +38,7 @@ fun SettingsDialog(
     uiState: CameraUiState,
     rotationDegrees: Float = 0f,
     onToggleResumeSettings: () -> Unit,
+    onToggleGeotagging: () -> Unit,
     onCycleNoiseReduction: () -> Unit,
     onCycleSharpness: () -> Unit,
     onToggleHistogram: () -> Unit,
@@ -155,18 +156,77 @@ fun SettingsDialog(
                     }
                 }
 
-                // 2. NR & SHARP Controls (Strictly Nothing Red palette)
+                // Geotagging GPS Toggle
+                val isGeo = uiState.isGeotaggingEnabled
+                val geoBgColor by animateColorAsState(
+                    targetValue = if (isGeo) Color(0x33E11D48) else Color(0xFF18181B),
+                    label = "geoBg"
+                )
+                val geoBorderColor by animateColorAsState(
+                    targetValue = if (isGeo) Color(0xFFE11D48) else Color(0xFF27272A),
+                    label = "geoBorder"
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(geoBgColor)
+                        .border(1.dp, geoBorderColor, shape)
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onToggleGeotagging()
+                        }
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "GEOTAGGING // GPS",
+                            color = if (isGeo) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = if (isGeo) "Embed GPS coordinates into EXIF" else "Location tags disabled",
+                            color = Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(shape)
+                            .background(if (isGeo) Color(0xFFE11D48) else Color(0xFF27272A))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isGeo) "ON" else "OFF",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                // 2. NR & SHARP Controls (Màu xám/trắng nếu tắt, hiện số và chế độ màu đỏ nếu đã chỉnh)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Noise Reduction
+                    val isNrActive = uiState.noiseReductionMode != NoiseReductionMode.OFF
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .clip(shape)
-                            .background(Color(0xFF18181B))
-                            .border(1.dp, Color(0xFF27272A), shape)
+                            .background(if (isNrActive) Color(0x22E11D48) else Color(0xFF18181B))
+                            .border(1.dp, if (isNrActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
                             .clickable {
                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 onCycleNoiseReduction()
@@ -175,32 +235,54 @@ fun SettingsDialog(
                     ) {
                         Text(
                             text = "NOISE REDUCTION",
-                            color = Color(0xFF71717A),
+                            color = if (isNrActive) Color(0xFFFF4D6D) else Color(0xFF71717A),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = uiState.noiseReductionMode.tag,
-                            color = when (uiState.noiseReductionMode) {
-                                NoiseReductionMode.OFF -> Color(0xFF71717A)
-                                NoiseReductionMode.FAST -> Color(0xFFFAFAFA)
-                                NoiseReductionMode.HIGH_QUALITY -> Color(0xFFE11D48)
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = when (uiState.noiseReductionMode) {
+                                    NoiseReductionMode.OFF -> "OFF"
+                                    NoiseReductionMode.FAST -> "+1"
+                                    NoiseReductionMode.HIGH_QUALITY -> "+2"
+                                },
+                                color = if (isNrActive) Color(0xFFE11D48) else Color(0xFFFAFAFA),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (isNrActive) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(shape)
+                                        .background(Color(0xFFE11D48))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = uiState.noiseReductionMode.label,
+                                        color = Color.White,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Sharpness
+                    val isSharpActive = uiState.sharpnessMode != SharpnessMode.OFF
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .clip(shape)
-                            .background(Color(0xFF18181B))
-                            .border(1.dp, Color(0xFF27272A), shape)
+                            .background(if (isSharpActive) Color(0x22E11D48) else Color(0xFF18181B))
+                            .border(1.dp, if (isSharpActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
                             .clickable {
                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 onCycleSharpness()
@@ -209,23 +291,44 @@ fun SettingsDialog(
                     ) {
                         Text(
                             text = "SHARPNESS",
-                            color = Color(0xFF71717A),
+                            color = if (isSharpActive) Color(0xFFFF4D6D) else Color(0xFF71717A),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = uiState.sharpnessMode.tag,
-                            color = when (uiState.sharpnessMode) {
-                                SharpnessMode.OFF -> Color(0xFF71717A)
-                                SharpnessMode.NORMAL -> Color(0xFFFAFAFA)
-                                SharpnessMode.HIGH -> Color(0xFFE11D48)
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = when (uiState.sharpnessMode) {
+                                    SharpnessMode.OFF -> "OFF"
+                                    SharpnessMode.NORMAL -> "0"
+                                    SharpnessMode.HIGH -> "+1"
+                                },
+                                color = if (isSharpActive) Color(0xFFE11D48) else Color(0xFFFAFAFA),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (isSharpActive) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(shape)
+                                        .background(Color(0xFFE11D48))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = uiState.sharpnessMode.label,
+                                        color = Color.White,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

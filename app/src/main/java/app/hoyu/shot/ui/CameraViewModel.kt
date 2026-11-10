@@ -52,7 +52,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update { current ->
                 val updatedList = listOf(info) + current.recentPhotos.filter { p -> p.uriString != info.uriString }
                 current.copy(
-                    isCapturing = false,
                     lastCapturedPhoto = info,
                     recentPhotos = updatedList
                 )
@@ -65,6 +64,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         loadRecentPhotos()
+
+        cameraController.onExposureCompleted = {
+            viewModelScope.launch {
+                _uiState.update { it.copy(isCapturing = false) }
+            }
+        }
 
         // Collect horizon tilt angle in real time
         viewModelScope.launch {
@@ -130,6 +135,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val initHorizon = settingsRepo.savedHorizonVisible
         val initPeaking = settingsRepo.savedPeakingEnabled
         val initZebra = settingsRepo.savedZebraEnabled
+        val initGeo = settingsRepo.isGeotaggingEnabled
+        cameraController.isGeotaggingEnabled = initGeo
 
         _uiState.update {
             it.copy(
@@ -159,7 +166,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isHistogramVisible = initHist,
                 isHorizonLevelVisible = initHorizon,
                 isFocusPeakingEnabled = initPeaking,
-                isZebraStripesEnabled = initZebra
+                isZebraStripesEnabled = initZebra,
+                isGeotaggingEnabled = initGeo
             )
         }
     }
@@ -324,6 +332,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val next = !_uiState.value.isZebraStripesEnabled
         _uiState.update { it.copy(isZebraStripesEnabled = next) }
         settingsRepo.savedZebraEnabled = next
+    }
+
+    fun toggleGeotagging() {
+        val next = !_uiState.value.isGeotaggingEnabled
+        _uiState.update { it.copy(isGeotaggingEnabled = next) }
+        settingsRepo.isGeotaggingEnabled = next
+        cameraController.isGeotaggingEnabled = next
     }
 
     fun openReviewDialog() {
