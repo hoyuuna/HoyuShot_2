@@ -2,6 +2,7 @@ package app.hoyu.shot.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceHolder
 import androidx.activity.compose.BackHandler
@@ -10,8 +11,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +41,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -1022,6 +1026,22 @@ private fun BottomControlsContent(
     var burstCount by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
 
+    val shutterRecoilScale = remember { Animatable(1.0f) }
+    val centerDotPunch = remember { Animatable(1.0f) }
+
+    LaunchedEffect(uiState.shutterBlinkTrigger) {
+        if (uiState.shutterBlinkTrigger > 0L) {
+            coroutineScope.launch {
+                shutterRecoilScale.animateTo(0.82f, tween(durationMillis = 30, easing = LinearEasing))
+                shutterRecoilScale.animateTo(1.0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh))
+            }
+            coroutineScope.launch {
+                centerDotPunch.animateTo(1.85f, tween(durationMillis = 30, easing = LinearEasing))
+                centerDotPunch.animateTo(1.0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh))
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1155,6 +1175,7 @@ private fun BottomControlsContent(
                 Box(
                     modifier = Modifier
                         .size(74.dp)
+                        .scale(shutterRecoilScale.value)
                         .border(3.dp, Color(0xFFE11D48), CircleShape)
                         .padding(5.dp)
                         .background(
@@ -1168,8 +1189,10 @@ private fun BottomControlsContent(
                                     val startTime = System.currentTimeMillis()
                                     var burstJob: Job? = null
 
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
                                     burstJob = coroutineScope.launch {
-                                        delay(500)
+                                        delay(450)
                                         if (isHolding) {
                                             isBursting = true
                                             burstCount = 0
@@ -1183,13 +1206,18 @@ private fun BottomControlsContent(
                                         }
                                     }
 
-                                    tryAwaitRelease()
+                                    val released = tryAwaitRelease()
                                     isHolding = false
                                     val duration = System.currentTimeMillis() - startTime
                                     burstJob.cancel()
 
-                                    if (!isBursting && duration < 500) {
-                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    if (!isBursting && duration < 450 && released) {
+                                        val haptic = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            HapticFeedbackConstants.CONFIRM
+                                        } else {
+                                            HapticFeedbackConstants.KEYBOARD_PRESS
+                                        }
+                                        view.performHapticFeedback(haptic)
                                         onCapture()
                                     }
 
@@ -1200,14 +1228,9 @@ private fun BottomControlsContent(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    val dotScale by animateFloatAsState(
-                        targetValue = if (uiState.isCapturing) 1.5f else 1.0f,
-                        animationSpec = tween(durationMillis = 80),
-                        label = "dotScale"
-                    )
                     Box(
                         modifier = Modifier
-                            .size((8 * dotScale).dp)
+                            .size((8 * centerDotPunch.value).dp)
                             .background(Color(0xFFE11D48), CircleShape)
                     )
                 }

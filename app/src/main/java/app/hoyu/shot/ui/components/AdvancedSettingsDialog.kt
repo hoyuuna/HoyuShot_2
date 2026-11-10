@@ -211,10 +211,10 @@ fun AdvancedSettingsDialog(
                     onToggle = onToggleMirrorSelfie
                 )
 
-                // Aux Lens Zoom Fallback (Ultrawide 0.6x & Telephoto HAL bypass)
+                // Aux Lens Zoom Fallback (Ultrawide & Telephoto HAL bypass)
                 SettingsToggleRow(
-                    title = "AUX LENS ZOOM FALLBACK (ALL CAMERAS)",
-                    subtitle = if (uiState.isTeleZoomFallbackEnabled) "Last resort bypass: if any aux sensor (0.6x ultrawide, 2x, 3.2x, 5x) is locked by HAL, simulates it via primary camera zoom" else "Standard physical sensor switch (reverts to 1x without zoom if blocked by HAL)",
+                    title = "AUX LENS ZOOM FALLBACK",
+                    subtitle = if (uiState.isTeleZoomFallbackEnabled) "Last resort bypass: simulates auxiliary lenses via primary camera zoom if physical sensor access is blocked by HAL" else "Standard physical sensor switch (reverts to 1x without zoom if blocked by HAL)",
                     isActive = uiState.isTeleZoomFallbackEnabled,
                     onToggle = onToggleTeleZoomFallback
                 )
@@ -758,10 +758,14 @@ private fun SettingsToggleRow(
                 onToggle()
             }
             .padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        ) {
             Text(
                 text = title,
                 color = if (isActive) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),

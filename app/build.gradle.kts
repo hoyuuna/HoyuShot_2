@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 1
-val propVersionName = (project.findProperty("versionName") as? String) ?: "0.0.$propVersionCode"
+val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 45
+val propVersionName = (project.findProperty("versionName") as? String) ?: "1.0.0"
 
 android {
     namespace = "app.hoyu.shot"
