@@ -1,8 +1,12 @@
 package app.hoyu.shot.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceHolder
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -30,6 +34,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +42,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import app.hoyu.shot.model.*
 import app.hoyu.shot.ui.components.*
 import kotlinx.coroutines.*
@@ -48,6 +54,19 @@ fun CameraScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val view = LocalView.current
+    val context = LocalContext.current
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            viewModel.setGeotaggingEnabled(true)
+        } else {
+            viewModel.setGeotaggingEnabled(false)
+        }
+    }
 
     var surfaceViewRef by remember { mutableStateOf<AutoFitSurfaceView?>(null) }
     var previewContainerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -426,7 +445,31 @@ fun CameraScreen(
             uiState = uiState,
             rotationDegrees = animatedRotation,
             onToggleResumeSettings = { viewModel.toggleResumeSettings() },
-            onToggleGeotagging = { viewModel.toggleGeotagging() },
+            onToggleGeotagging = {
+                if (uiState.isGeotaggingEnabled) {
+                    viewModel.setGeotaggingEnabled(false)
+                } else {
+                    val hasFine = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (hasFine || hasCoarse) {
+                        viewModel.setGeotaggingEnabled(true)
+                    } else {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                }
+            },
             onCycleNoiseReduction = { viewModel.cycleNoiseReduction() },
             onCycleSharpness = { viewModel.cycleSharpness() },
             onToggleHistogram = { viewModel.toggleHistogram() },

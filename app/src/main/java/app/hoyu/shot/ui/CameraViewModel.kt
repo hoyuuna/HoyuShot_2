@@ -135,7 +135,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val initHorizon = settingsRepo.savedHorizonVisible
         val initPeaking = settingsRepo.savedPeakingEnabled
         val initZebra = settingsRepo.savedZebraEnabled
-        val initGeo = settingsRepo.isGeotaggingEnabled
+        val hasLocPerm = cameraController.hasLocationPermission()
+        val initGeo = settingsRepo.isGeotaggingEnabled && hasLocPerm
+        if (settingsRepo.isGeotaggingEnabled && !hasLocPerm) {
+            settingsRepo.isGeotaggingEnabled = false
+        }
         cameraController.isGeotaggingEnabled = initGeo
 
         _uiState.update {
@@ -175,11 +179,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun startSensors() {
         horizonSensor.start()
         orientationListener.start()
+        if (_uiState.value.isGeotaggingEnabled) {
+            if (cameraController.hasLocationPermission()) {
+                cameraController.resumeLocation()
+            } else {
+                setGeotaggingEnabled(false)
+            }
+        }
     }
 
     fun stopSensors() {
         horizonSensor.stop()
         orientationListener.stop()
+        cameraController.pauseLocation()
     }
 
     fun startCamera(previewSurface: Surface) {
@@ -334,11 +346,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsRepo.savedZebraEnabled = next
     }
 
+    fun hasLocationPermission(): Boolean = cameraController.hasLocationPermission()
+
+    fun setGeotaggingEnabled(enabled: Boolean) {
+        val actual = if (enabled) cameraController.hasLocationPermission() else false
+        _uiState.update { it.copy(isGeotaggingEnabled = actual) }
+        settingsRepo.isGeotaggingEnabled = actual
+        cameraController.isGeotaggingEnabled = actual
+    }
+
     fun toggleGeotagging() {
         val next = !_uiState.value.isGeotaggingEnabled
-        _uiState.update { it.copy(isGeotaggingEnabled = next) }
-        settingsRepo.isGeotaggingEnabled = next
-        cameraController.isGeotaggingEnabled = next
+        setGeotaggingEnabled(next)
     }
 
     fun openReviewDialog() {

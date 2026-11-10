@@ -57,9 +57,29 @@ class Camera2Controller(
     private var isAeLocked = false
     private var isAfLocked = false
 
-    var isGeotaggingEnabled = false
-    var onExposureCompleted: (() -> Unit)? = null
     private val locationHelper = LocationHelper(context)
+    var isGeotaggingEnabled = false
+        set(value) {
+            field = value
+            if (value && locationHelper.hasLocationPermission()) {
+                locationHelper.startListening()
+            } else {
+                locationHelper.stopListening()
+            }
+        }
+    var onExposureCompleted: (() -> Unit)? = null
+
+    fun hasLocationPermission(): Boolean = locationHelper.hasLocationPermission()
+
+    fun resumeLocation() {
+        if (isGeotaggingEnabled && locationHelper.hasLocationPermission()) {
+            locationHelper.startListening()
+        }
+    }
+
+    fun pauseLocation() {
+        locationHelper.stopListening()
+    }
 
     var currentExposureMode = ExposureMode.AUTO
     var currentIso = 100
@@ -581,7 +601,7 @@ class Camera2Controller(
 
             // Geotagging GPS: Set hardware GPS location on CaptureRequest
             if (isGeotaggingEnabled) {
-                val loc = locationHelper.getLastKnownLocation()
+                val loc = locationHelper.getBestLocation()
                 if (loc != null) {
                     captureBuilder.set(CaptureRequest.JPEG_GPS_LOCATION, loc)
                 }
@@ -629,12 +649,17 @@ class Camera2Controller(
     private fun saveJpegImage(image: android.media.Image) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val fileName = "IMG_$timeStamp.jpg"
+        val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
+            }
+            if (loc != null) {
+                put(MediaStore.Images.Media.LATITUDE, loc.latitude)
+                put(MediaStore.Images.Media.LONGITUDE, loc.longitude)
             }
         }
 
@@ -650,18 +675,15 @@ class Camera2Controller(
             }
 
             // Fallback guarantee: embed GPS EXIF if enabled
-            if (isGeotaggingEnabled) {
-                val loc = locationHelper.getLastKnownLocation()
-                if (loc != null) {
-                    try {
-                        context.contentResolver.openFileDescriptor(destUri, "rw")?.use { pfd ->
-                            val exif = ExifInterface(pfd.fileDescriptor)
-                            exif.setGpsInfo(loc)
-                            exif.saveAttributes()
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to write EXIF GPS", e)
+            if (loc != null) {
+                try {
+                    context.contentResolver.openFileDescriptor(destUri, "rw")?.use { pfd ->
+                        val exif = ExifInterface(pfd.fileDescriptor)
+                        exif.setGpsInfo(loc)
+                        exif.saveAttributes()
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to write EXIF GPS", e)
                 }
             }
 
@@ -697,12 +719,17 @@ class Camera2Controller(
     ) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val fileName = "RAW_$timeStamp.dng"
+        val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
+            }
+            if (loc != null) {
+                put(MediaStore.Images.Media.LATITUDE, loc.latitude)
+                put(MediaStore.Images.Media.LONGITUDE, loc.longitude)
             }
         }
 
@@ -711,11 +738,8 @@ class Camera2Controller(
             context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
                 val dngCreator = DngCreator(characteristics, captureResult)
                 dngCreator.setOrientation(lastJpegOrientation)
-                if (isGeotaggingEnabled) {
-                    val loc = locationHelper.getLastKnownLocation()
-                    if (loc != null) {
-                        dngCreator.setLocation(loc)
-                    }
+                if (loc != null) {
+                    dngCreator.setLocation(loc)
                 }
                 dngCreator.writeImage(outputStream, image)
                 dngCreator.close()
