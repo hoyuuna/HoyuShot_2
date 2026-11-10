@@ -154,7 +154,7 @@ class UpdateManager(private val context: Context) {
                             UpdateInfo(
                                 tagName = rawTag,
                                 versionName = cleanVersion,
-                                changelog = "Cập nhật phiên bản mới $rawTag.",
+                                changelog = "Version $rawTag release.",
                                 downloadUrl = directApkUrl,
                                 fileSizeBytes = 0L,
                                 isPreRelease = false
@@ -169,7 +169,7 @@ class UpdateManager(private val context: Context) {
             Log.e(TAG, "Atom fallback also failed: ${e.message}")
         }
 
-        UpdateCheckResult.Error("Không thể kết nối đến máy chủ GitHub để kiểm tra cập nhật.")
+        UpdateCheckResult.Error("Cannot connect to GitHub releases server.")
     }
 
     /**
@@ -290,7 +290,7 @@ class UpdateManager(private val context: Context) {
                 "HoyuShot Updates",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Thông báo khi có bản cập nhật mới của HoyuShot"
+                description = "Notifications for new HoyuShot version updates"
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -309,9 +309,9 @@ class UpdateManager(private val context: Context) {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.app_icon)
-            .setContentTitle("HoyuShot ${info.tagName} có sẵn")
-            .setContentText("Nhấn để tải về và cập nhật phiên bản mới nhất")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("Phiên bản ${info.tagName} đã sẵn sàng:\n${info.changelog}"))
+            .setContentTitle("HoyuShot ${info.tagName} Available")
+            .setContentText("Tap to download and update to latest version")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Version ${info.tagName} is ready:\n${info.changelog}"))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)

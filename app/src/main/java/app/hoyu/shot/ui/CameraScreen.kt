@@ -894,8 +894,7 @@ private fun ViewfinderPreviewContent(
                             color = if (isSelected) Color.Black else Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.rotate(animatedRotation)
+                            fontFamily = FontFamily.Monospace
                         )
                     }
                 }
@@ -980,8 +979,7 @@ private fun BottomControlsContent(
                             color = if (isSelected) Color.Black else Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.rotate(animatedRotation)
+                            fontFamily = FontFamily.Monospace
                         )
                     }
                 }

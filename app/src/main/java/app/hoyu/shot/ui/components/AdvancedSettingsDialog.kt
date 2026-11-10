@@ -12,7 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
@@ -29,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.CameraUiState
 import app.hoyu.shot.updater.UpdateCheckResult
-import app.hoyu.shot.updater.UpdateInfo
 import app.hoyu.shot.updater.UpdateManager
 import kotlinx.coroutines.launch
 import java.io.File
@@ -53,8 +51,6 @@ fun AdvancedSettingsDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (!visible) return
-
     val context = LocalContext.current
     val view = LocalView.current
     val shape = RoundedCornerShape(2.dp)
@@ -68,19 +64,22 @@ fun AdvancedSettingsDialog(
     var downloadProgressText by remember { mutableStateOf("") }
     var downloadedApkFile by remember { mutableStateOf<File?>(null) }
 
-    // Fixed portrait only container (always oriented upright)
+    // Fixed portrait modal with smooth scale + fade + slide open/close animation
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(180)) + slideInVertically(initialOffsetY = { it / 6 }, animationSpec = tween(200)),
-        exit = fadeOut(tween(150)) + slideOutVertically(targetOffsetY = { it / 6 }, animationSpec = tween(150)),
+        enter = fadeIn(tween(200)) + scaleIn(tween(200), initialScale = 0.92f) + slideInVertically(tween(200), initialOffsetY = { it / 10 }),
+        exit = fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.92f) + slideOutVertically(tween(150), targetOffsetY = { it / 10 }),
         modifier = modifier.fillMaxSize()
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xEE000000))
-                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {
-                    // Tap outside dismiss
+                .background(Color(0xCC000000))
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                ) {
+                    onDismiss()
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -89,8 +88,14 @@ fun AdvancedSettingsDialog(
                     .fillMaxWidth(0.92f)
                     .fillMaxHeight(0.88f)
                     .clip(shape)
-                    .background(Color(0xF809090B)) // shadcn zinc-950
+                    .background(Color(0xF809090B))
                     .border(1.dp, Color(0xFF27272A), shape)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    ) {
+                        // Prevent dismiss when clicking inside dialog
+                    }
                     .padding(18.dp)
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -101,22 +106,14 @@ fun AdvancedSettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "ADVANCED // CONFIG",
-                            color = Color(0xFFFAFAFA),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "Fixed Portrait Mode • System Parameters",
-                            color = Color(0xFF71717A),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    Text(
+                        text = "SYS // ADVANCED CONFIG",
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
 
                     Box(
                         modifier = Modifier
@@ -141,7 +138,7 @@ fun AdvancedSettingsDialog(
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
                 // ==========================================
-                // SECTION 1: CAPTURE & JPEG QUALITY
+                // SECTION 1: CAPTURE & SENSOR
                 // ==========================================
                 SectionHeader("01 // CAPTURE & SENSOR")
 
@@ -152,14 +149,14 @@ fun AdvancedSettingsDialog(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "TỈ LỆ NÉN JPEG",
+                            text = "JPEG COMPRESSION",
                             color = Color(0xFFFAFAFA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            text = "${uiState.jpegQuality}% ${if (uiState.jpegQuality == 95) "(KHUYẾN CÁO)" else ""}",
+                            text = "${uiState.jpegQuality}% ${if (uiState.jpegQuality == 95) "(REC)" else ""}",
                             color = if (uiState.jpegQuality == 95) Color(0xFFE11D48) else Color(0xFFA1A1AA),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
@@ -186,10 +183,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // Mirror Selfie Toggle
+                // Mirror Front Camera Toggle
                 SettingsToggleRow(
-                    title = "LẬT ẢNH SELFIE (MIRROR)",
-                    subtitle = if (uiState.isMirrorSelfie) "Ảnh selfie được lật gương như màn hình" else "Ảnh lưu theo góc nhìn thực tế",
+                    title = "MIRROR FRONT CAMERA",
+                    subtitle = if (uiState.isMirrorSelfie) "Save selfies mirrored as previewed" else "Save standard non-mirrored photo",
                     isActive = uiState.isMirrorSelfie,
                     onToggle = onToggleMirrorSelfie
                 )
@@ -197,7 +194,7 @@ fun AdvancedSettingsDialog(
                 // Antibanding Mode
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "ANTIBANDING (CHỐNG NHÁY ĐÈN)",
+                        text = "ANTIBANDING",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -207,7 +204,7 @@ fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "AUTO" to "AUTO", "50HZ" to "50Hz", "60HZ" to "60Hz").forEach { (mode, label) ->
+                        listOf("OFF" to "OFF", "AUTO" to "AUTO", "50HZ" to "50Hz", "60HZ" to "60Hz").forEach { (mode, label) ->
                             val isSelected = uiState.antibandingMode.equals(mode, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -225,14 +222,14 @@ fun AdvancedSettingsDialog(
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
                 // ==========================================
-                // SECTION 2: GESTURES & HARDWARE BUTTONS
+                // SECTION 2: GESTURES & HARDWARE KEYS
                 // ==========================================
-                SectionHeader("02 // THAO TÁC CẢM ỨNG & PHÍM CỨNG")
+                SectionHeader("02 // GESTURES & HARDWARE KEYS")
 
-                // Tap Screen Action
+                // Tap Viewport Action
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "NHẤN MÀN HÌNH (TAP VIEW)",
+                        text = "TAP VIEWPORT",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -242,7 +239,7 @@ fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "FOCUS" to "FOCUS", "AE" to "AE ĐIỂM", "SHUTTER" to "CHỤP").forEach { (action, label) ->
+                        listOf("OFF" to "OFF", "FOCUS" to "FOCUS", "AE" to "SPOT AE", "SHUTTER" to "SHUTTER").forEach { (action, label) ->
                             val isSelected = uiState.tapAction.equals(action, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -257,10 +254,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // Hold Screen Action
+                // Hold Viewport Action
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "GIỮ MÀN HÌNH (HOLD VIEW)",
+                        text = "HOLD VIEWPORT",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -270,7 +267,7 @@ fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "FOCUS" to "FOCUS", "AE" to "AE ĐIỂM", "SHUTTER" to "CHỤP").forEach { (action, label) ->
+                        listOf("OFF" to "OFF", "FOCUS" to "FOCUS", "AE" to "SPOT AE", "SHUTTER" to "SHUTTER").forEach { (action, label) ->
                             val isSelected = uiState.holdAction.equals(action, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -285,10 +282,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // Volume Up Button
+                // Volume Up Key
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "PHÍM TĂNG ÂM LƯỢNG (VOL +)",
+                        text = "VOLUME UP KEY",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -300,7 +297,7 @@ fun AdvancedSettingsDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "SHUTTER" to "CHỤP", "AE_LOCK" to "KHÓA AE", "EV" to "+/- EV", "ZOOM" to "+/- ZOOM").forEach { (action, label) ->
+                        listOf("OFF" to "OFF", "SHUTTER" to "SHUTTER", "AE_LOCK" to "AE LOCK", "EV" to "+/- EV", "ZOOM" to "+/- ZOOM").forEach { (action, label) ->
                             val isSelected = uiState.volumeUpAction.equals(action, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -314,10 +311,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // Volume Down Button
+                // Volume Down Key
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "PHÍM GIẢM ÂM LƯỢNG (VOL -)",
+                        text = "VOLUME DOWN KEY",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -329,7 +326,7 @@ fun AdvancedSettingsDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "SHUTTER" to "CHỤP", "AE_LOCK" to "KHÓA AE", "EV" to "+/- EV", "ZOOM" to "+/- ZOOM").forEach { (action, label) ->
+                        listOf("OFF" to "OFF", "SHUTTER" to "SHUTTER", "AE_LOCK" to "AE LOCK", "EV" to "+/- EV", "ZOOM" to "+/- ZOOM").forEach { (action, label) ->
                             val isSelected = uiState.volumeDownAction.equals(action, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -346,14 +343,14 @@ fun AdvancedSettingsDialog(
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
                 // ==========================================
-                // SECTION 3: SYSTEM FEEDBACK & DISPLAY
+                // SECTION 3: FEEDBACK & INTERACTION
                 // ==========================================
-                SectionHeader("03 // HỆ THỐNG & HIỂN THỊ")
+                SectionHeader("03 // FEEDBACK & INTERACTION")
 
-                // Camera Sound / Shutter Haptics
+                // Shutter Feedback (Strictly OFF / VIBRATE)
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "PHẢN HỒI NÚT CHỤP (SHUTTER)",
+                        text = "SHUTTER FEEDBACK",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -363,7 +360,7 @@ fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("OFF" to "TẮT (IM LẶNG)", "VIBRATE" to "RUNG HAPTIC").forEach { (mode, label) ->
+                        listOf("OFF" to "OFF", "VIBRATE" to "VIBRATE").forEach { (mode, label) ->
                             val isSelected = uiState.cameraSoundMode.equals(mode, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -378,10 +375,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // UI Touch Haptics
+                // UI Haptic Feedback (Strictly OFF / VIBRATE)
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "PHẢN HỒI CẢM ỨNG GIAO DIỆN (UI)",
+                        text = "UI HAPTIC FEEDBACK",
                         color = Color(0xFFFAFAFA),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -391,7 +388,7 @@ fun AdvancedSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("OFF" to "TẮT", "VIBRATE" to "RUNG HAPTIC").forEach { (mode, label) ->
+                        listOf("OFF" to "OFF", "VIBRATE" to "VIBRATE").forEach { (mode, label) ->
                             val isSelected = uiState.uiHapticsMode.equals(mode, ignoreCase = true)
                             ChipItem(
                                 label = label,
@@ -406,10 +403,10 @@ fun AdvancedSettingsDialog(
                     }
                 }
 
-                // UI Blur Toggle
+                // Interface Blur Toggle
                 SettingsToggleRow(
-                    title = "BLUR GIAO DIỆN (FROSTED GLASS)",
-                    subtitle = if (uiState.isUiBlurEnabled) "Nền popup mờ nhẹ phong cách Nothing OS" else "Nền đen tuyền nguyên bản",
+                    title = "INTERFACE BLUR",
+                    subtitle = if (uiState.isUiBlurEnabled) "Translucent frosted popup backdrops" else "Solid opaque black panels",
                     isActive = uiState.isUiBlurEnabled,
                     onToggle = onToggleUiBlur
                 )
@@ -417,9 +414,9 @@ fun AdvancedSettingsDialog(
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
                 // ==========================================
-                // SECTION 4: IN-APP UPDATER
+                // SECTION 4: SYSTEM UPDATES
                 // ==========================================
-                SectionHeader("04 // CẬP NHẬT ỨNG DỤNG")
+                SectionHeader("04 // SYSTEM UPDATES")
 
                 // Update Action Card
                 Column(
@@ -438,14 +435,14 @@ fun AdvancedSettingsDialog(
                     ) {
                         Column {
                             Text(
-                                text = "TRÌNH CẬP NHẬT TRỰC TIẾP",
+                                text = "OTA UPDATE MANAGER",
                                 color = Color(0xFFFAFAFA),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                text = "Phiên bản hiện tại: v${updateManager.currentVersionName}",
+                                text = "Current installed: v${updateManager.currentVersionName}",
                                 color = Color(0xFF71717A),
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace
@@ -479,11 +476,11 @@ fun AdvancedSettingsDialog(
                                     strokeWidth = 2.dp
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("ĐANG TẢI...", fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                Text("CHECKING...", fontSize = 9.sp, fontFamily = FontFamily.Monospace)
                             } else {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("KIỂM TRA", fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("CHECK", fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
@@ -500,7 +497,7 @@ fun AdvancedSettingsDialog(
                                     .padding(8.dp)
                             ) {
                                 Text(
-                                    text = "✓ Bạn đang sử dụng phiên bản mới nhất (${res.currentVersion}).",
+                                    text = "✓ App is up to date (${res.currentVersion}).",
                                     color = Color(0xFF10B981),
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace
@@ -540,7 +537,7 @@ fun AdvancedSettingsDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "PHIÊN BẢN MỚI: ${res.info.tagName}",
+                                        text = "UPDATE AVAILABLE: ${res.info.tagName}",
                                         color = Color(0xFFFF4D6D),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Black,
@@ -597,7 +594,7 @@ fun AdvancedSettingsDialog(
                                     ) {
                                         Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("CÀI ĐẶT BẢN CẬP NHẬT (INSTALL APK)", fontSize = 10.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                                        Text("INSTALL APK", fontSize = 10.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
                                     }
                                 } else {
                                     Button(
@@ -605,7 +602,7 @@ fun AdvancedSettingsDialog(
                                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                             scope.launch {
                                                 downloadProgress = 0
-                                                downloadProgressText = "Đang bắt đầu tải..."
+                                                downloadProgressText = "Connecting..."
                                                 val apk = updateManager.downloadApk(
                                                     downloadUrl = res.info.downloadUrl,
                                                     versionTag = res.info.tagName
@@ -614,9 +611,9 @@ fun AdvancedSettingsDialog(
                                                     val readMb = bytesRead / (1024f * 1024f)
                                                     val totalMb = if (totalBytes > 0) totalBytes / (1024f * 1024f) else 0f
                                                     downloadProgressText = if (totalBytes > 0) {
-                                                        "Tải $percent% [${String.format(java.util.Locale.US, "%.1f", readMb)} / ${String.format(java.util.Locale.US, "%.1f", totalMb)} MB]"
+                                                        "Downloading: $percent% [${String.format(java.util.Locale.US, "%.1f", readMb)} / ${String.format(java.util.Locale.US, "%.1f", totalMb)} MB]"
                                                     } else {
-                                                        "Đang tải... ${String.format(java.util.Locale.US, "%.1f", readMb)} MB"
+                                                        "Downloading: ${String.format(java.util.Locale.US, "%.1f", readMb)} MB"
                                                     }
                                                 }
                                                 downloadProgress = null
@@ -624,7 +621,7 @@ fun AdvancedSettingsDialog(
                                                     downloadedApkFile = apk
                                                     updateManager.installApk(apk)
                                                 } else {
-                                                    downloadProgressText = "Tải thất bại, vui lòng thử lại."
+                                                    downloadProgressText = "Download failed, please try again."
                                                 }
                                             }
                                         },
@@ -634,7 +631,7 @@ fun AdvancedSettingsDialog(
                                     ) {
                                         Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("TẢI VÀ CÀI ĐẶT NGAY", fontSize = 10.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                                        Text("DOWNLOAD & INSTALL", fontSize = 10.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
                                     }
                                 }
                             }
@@ -645,25 +642,27 @@ fun AdvancedSettingsDialog(
 
                 // Auto update check toggle
                 SettingsToggleRow(
-                    title = "TỰ ĐỘNG KIỂM TRA BẢN MỚI",
-                    subtitle = if (uiState.isAutoUpdateCheckEnabled) "Tự động kiểm tra trên GitHub khi mở ứng dụng" else "Chỉ kiểm tra khi nhấn thủ công",
+                    title = "CHECK UPDATES ON BOOT",
+                    subtitle = if (uiState.isAutoUpdateCheckEnabled) "Automatically checks GitHub on app launch" else "Check manually only",
                     isActive = uiState.isAutoUpdateCheckEnabled,
                     onToggle = onToggleAutoUpdateCheck
                 )
 
                 // Pre-release toggle
                 SettingsToggleRow(
-                    title = "NHẬN BẢN THỬ NGHIỆM (PRE-RELEASE)",
-                    subtitle = if (uiState.isPreReleaseUpdateEnabled) "Nhận các bản cập nhật sớm nhất từ GitHub CI/CD" else "Chỉ nhận bản phát hành chính thức",
+                    title = "INCLUDE PRE-RELEASES",
+                    subtitle = if (uiState.isPreReleaseUpdateEnabled) "Receive early builds from GitHub CI/CD" else "Stable releases only",
                     isActive = uiState.isPreReleaseUpdateEnabled,
                     onToggle = onTogglePreReleaseUpdate
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // Footer exactly as requested
                 Text(
-                    text = "HoyuShot Pro Camera • Tailored for Xiaomi 13 (2211133C)\nStrict Nothing OS Architecture // shadcn Design System",
-                    color = Color(0xFF52525B),
-                    fontSize = 8.sp,
+                    text = "HoyuShot • Made with love by Hoyuuna",
+                    color = Color(0xFF71717A),
+                    fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -759,7 +758,7 @@ private fun SettingsToggleRow(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isActive) "BẬT" else "TẮT",
+                text = if (isActive) "ON" else "OFF",
                 color = Color.White,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Black,

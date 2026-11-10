@@ -339,7 +339,7 @@ fun SettingsDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "NÂNG CAO // ADVANCED",
+                            text = "SYS // ADVANCED CONFIG",
                             color = Color(0xFFFAFAFA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -347,7 +347,7 @@ fun SettingsDialog(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "JPEG, cử chỉ, phím âm lượng, antibanding & updater",
+                            text = "JPEG quality, gestures, hardware keys, antibanding & updater",
                             color = Color(0xFF71717A),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace
@@ -355,7 +355,7 @@ fun SettingsDialog(
                     }
 
                     Text(
-                        text = "MỞ >",
+                        text = "OPEN >",
                         color = Color(0xFFE11D48),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
