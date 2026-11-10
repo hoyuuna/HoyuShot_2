@@ -751,11 +751,26 @@ class Camera2Controller(
             applyWhiteBalance(builder, currentWbPreset, currentKelvin)
 
             // 6. Flash / Torch
-            when (currentFlashMode) {
-                FlashMode.OFF -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                FlashMode.AUTO -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                FlashMode.ON -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
-                FlashMode.TORCH -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+            val isManualOrClampedExposure = currentExposureMode == ExposureMode.MANUAL ||
+                    currentExposureMode == ExposureMode.SHUTTER_PRIORITY ||
+                    currentExposureMode == ExposureMode.ISO_PRIORITY ||
+                    isExposureClamped
+
+            if (isManualOrClampedExposure) {
+                // In manual or limit-clamped modes, CONTROL_AE_MODE must stay OFF to preserve shutter/ISO bounds!
+                // Flash is controlled directly via FLASH_MODE instead of overriding AE mode to full auto.
+                when (currentFlashMode) {
+                    FlashMode.TORCH -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                    else -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                }
+            } else {
+                // In standard Auto mode without limits, hardware AE handles flash metering
+                when (currentFlashMode) {
+                    FlashMode.OFF -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    FlashMode.AUTO -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    FlashMode.ON -> builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    FlashMode.TORCH -> builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                }
             }
 
             // 7. Noise Reduction
@@ -895,6 +910,23 @@ class Camera2Controller(
                 val loc = locationHelper.getBestLocation()
                 if (loc != null) {
                     captureBuilder.set(CaptureRequest.JPEG_GPS_LOCATION, loc)
+                }
+            }
+
+            // Flash synchronization under manual or clamped AE
+            val aeMode = captureBuilder.get(CaptureRequest.CONTROL_AE_MODE)
+            if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+                when (currentFlashMode) {
+                    FlashMode.ON -> captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                    FlashMode.AUTO -> {
+                        if (lastMeasuredIso > 400 || isExposureClamped) {
+                            captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                        } else {
+                            captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                        }
+                    }
+                    FlashMode.TORCH -> captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                    FlashMode.OFF -> captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 }
             }
 

@@ -68,6 +68,9 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestPermissions() {
         val required = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            required.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             required.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }

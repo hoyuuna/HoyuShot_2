@@ -1,6 +1,7 @@
 package app.hoyu.shot.model
 
 import androidx.compose.ui.geometry.Offset
+import app.hoyu.shot.updater.UpdateInfo
 
 data class HistogramData(
     val lumaBins: IntArray = IntArray(256),
@@ -134,6 +135,12 @@ data class CameraUiState(
     // Semi-Auto Bounds / Limits (Auto ISO Min Shutter Speed & Max ISO Limit)
     val minShutterLimitNanos: Long? = null,
     val maxIsoLimit: Int? = null,
+
+    // On-boot Auto Update Detection
+    val availableUpdateInfo: UpdateInfo? = null,
+    val isUpdateDialogVisible: Boolean = false,
+    val updateDownloadProgress: Int? = null,
+    val isDownloadingUpdate: Boolean = false,
 
     // UI Active parameter dial
     val activeDialParameter: DialParameter? = null
