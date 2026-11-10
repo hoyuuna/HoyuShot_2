@@ -126,6 +126,7 @@ data class CameraUiState(
     val isUiBlurEnabled: Boolean = true,
     val isAutoUpdateCheckEnabled: Boolean = true,
     val isPreReleaseUpdateEnabled: Boolean = true,
+    val isTeleZoomFallbackEnabled: Boolean = true,
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),
@@ -134,6 +135,10 @@ data class CameraUiState(
     // Semi-Auto Bounds / Limits (Auto ISO Min Shutter Speed & Max ISO Limit)
     val minShutterLimitNanos: Long? = null,
     val maxIsoLimit: Int? = null,
+
+    // White border shutter blink trigger & simulated telephoto base zoom
+    val shutterBlinkTrigger: Long = 0L,
+    val simulatedTeleBaseZoom: Float = 1.0f,
 
     // UI Active parameter dial
     val activeDialParameter: DialParameter? = null

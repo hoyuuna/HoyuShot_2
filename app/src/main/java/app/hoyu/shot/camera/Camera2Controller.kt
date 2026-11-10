@@ -931,6 +931,18 @@ class Camera2Controller(
             }
 
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureStarted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    timestamp: Long,
+                    frameNumber: Long
+                ) {
+                    super.onCaptureStarted(session, request, timestamp, frameNumber)
+                    // Release capture lock immediately as exposure begins: zero shutter lag for rapid shooting
+                    isCapturing = false
+                    onExposureCompleted?.invoke()
+                }
+
                 override fun onCaptureCompleted(
                     session: CameraCaptureSession,
                     request: CaptureRequest,

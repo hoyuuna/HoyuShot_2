@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -27,7 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -568,6 +569,7 @@ fun CameraScreen(
             onToggleUiBlur = { viewModel.toggleUiBlur() },
             onToggleAutoUpdateCheck = { viewModel.toggleAutoUpdateCheck() },
             onTogglePreReleaseUpdate = { viewModel.togglePreReleaseUpdate() },
+            onToggleTeleZoomFallback = { viewModel.toggleTeleZoomFallback() },
             onDismiss = {
                 isAdvancedSettingsVisible = false
                 scrollToUpdates = false
@@ -727,6 +729,17 @@ private fun ViewfinderPreviewContent(
     onResetEv: () -> Unit
 ) {
     val view = LocalView.current
+    val blinkAlpha = remember { Animatable(0f) }
+
+    LaunchedEffect(uiState.shutterBlinkTrigger) {
+        if (uiState.shutterBlinkTrigger > 0L) {
+            blinkAlpha.snapTo(1f)
+            blinkAlpha.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 80, easing = LinearEasing)
+            )
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -968,6 +981,18 @@ private fun ViewfinderPreviewContent(
                 }
             }
         }
+
+        // White border shutter blink animation on exposure (Leica / mirrorless viewfinder pulse)
+        if (blinkAlpha.value > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(
+                        width = 3.5.dp,
+                        color = Color.White.copy(alpha = blinkAlpha.value)
+                    )
+            )
+        }
     }
 }
 
@@ -1175,19 +1200,16 @@ private fun BottomControlsContent(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (uiState.isCapturing) {
-                        CircularProgressIndicator(
-                            color = Color(0xFFE11D48),
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFFE11D48), CircleShape)
-                        )
-                    }
+                    val dotScale by animateFloatAsState(
+                        targetValue = if (uiState.isCapturing) 1.5f else 1.0f,
+                        animationSpec = tween(durationMillis = 80),
+                        label = "dotScale"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size((8 * dotScale).dp)
+                            .background(Color(0xFFE11D48), CircleShape)
+                    )
                 }
             }
 

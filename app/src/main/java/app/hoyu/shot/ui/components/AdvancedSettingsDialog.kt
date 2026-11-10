@@ -50,6 +50,7 @@ fun AdvancedSettingsDialog(
     onToggleUiBlur: () -> Unit,
     onToggleAutoUpdateCheck: () -> Unit,
     onTogglePreReleaseUpdate: () -> Unit,
+    onToggleTeleZoomFallback: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -208,6 +209,14 @@ fun AdvancedSettingsDialog(
                     subtitle = if (uiState.isMirrorSelfie) "Save selfies mirrored as previewed" else "Save standard non-mirrored photo",
                     isActive = uiState.isMirrorSelfie,
                     onToggle = onToggleMirrorSelfie
+                )
+
+                // Telephoto Zoom Fallback (Pixel / Aux vendor lock bypass)
+                SettingsToggleRow(
+                    title = "TELEPHOTO ZOOM FALLBACK",
+                    subtitle = if (uiState.isTeleZoomFallbackEnabled) "Pixel/Aux HAL bypass: simulates tele lens via primary camera zoom (e.g. 5.1x)" else "Standard physical sensor switch (reverts to 1x if blocked by HAL)",
+                    isActive = uiState.isTeleZoomFallbackEnabled,
+                    onToggle = onToggleTeleZoomFallback
                 )
 
                 // Antibanding Mode

@@ -159,4 +159,8 @@ class SettingsRepository(context: Context) {
     var isPreReleaseUpdateEnabled: Boolean
         get() = prefs.getBoolean("adv_prerelease_update", true)
         set(value) = prefs.edit().putBoolean("adv_prerelease_update", value).apply()
+
+    var isTeleZoomFallbackEnabled: Boolean
+        get() = prefs.getBoolean("adv_tele_zoom_fallback", true)
+        set(value) = prefs.edit().putBoolean("adv_tele_zoom_fallback", value).apply()
 }
