@@ -677,7 +677,9 @@ private fun ViewfinderPreviewContent(
         // Tap-to-Focus Reticle (Animated spring and pulse on lock)
         FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
 
-        // Live Histogram: Strictly positioned in user's bottom-left corner across all 4 orientations
+        val hasLensSwitcherInPreview = uiState.availableLenses.size > 1 && uiState.aspectRatio != AspectRatio.RATIO_16_9
+
+        // Live Histogram: Positioned in corner unless obstructed by lens switcher in preview
         if (uiState.isHistogramVisible) {
             val histAlignment = when (uiState.uiRotationDegrees) {
                 90f -> Alignment.TopStart
@@ -686,10 +688,10 @@ private fun ViewfinderPreviewContent(
                 else -> Alignment.BottomStart
             }
             val histPadding = when (uiState.uiRotationDegrees) {
-                90f -> Modifier.padding(start = 14.dp, top = 76.dp)
-                180f -> Modifier.padding(end = 14.dp, top = 76.dp)
-                270f -> Modifier.padding(end = 14.dp, bottom = 76.dp)
-                else -> Modifier.padding(start = 14.dp, bottom = 76.dp)
+                90f -> Modifier.padding(start = 14.dp, top = 14.dp)
+                180f -> Modifier.padding(end = 14.dp, top = 14.dp)
+                270f -> if (hasLensSwitcherInPreview) Modifier.padding(end = 14.dp, bottom = 76.dp) else Modifier.padding(end = 14.dp, bottom = 14.dp)
+                else -> if (hasLensSwitcherInPreview) Modifier.padding(start = 14.dp, bottom = 76.dp) else Modifier.padding(start = 14.dp, bottom = 14.dp)
             }
             Box(
                 modifier = Modifier
@@ -705,7 +707,7 @@ private fun ViewfinderPreviewContent(
             }
         }
 
-        // EV Position Alert Badge: In portrait sits above lens switcher; in the other 3 orientations sits close to the bottom edge
+        // EV Position Alert Badge: In portrait sits above lens switcher if present; in other orientations sits near edge
         if (uiState.evCompensationIndex != 0) {
             val alertAlignment = when (uiState.uiRotationDegrees) {
                 90f -> Alignment.CenterStart
@@ -717,7 +719,7 @@ private fun ViewfinderPreviewContent(
                 90f -> Modifier.padding(start = 12.dp)
                 180f -> Modifier.padding(top = 12.dp)
                 270f -> Modifier.padding(end = 12.dp)
-                else -> Modifier.padding(bottom = 56.dp)
+                else -> Modifier.padding(bottom = if (hasLensSwitcherInPreview) 56.dp else 12.dp)
             }
             Box(
                 modifier = Modifier
@@ -911,8 +913,7 @@ private fun BottomControlsContent(
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.rotate(animatedRotation)
+                            fontFamily = FontFamily.Monospace
                         )
                     }
                 }

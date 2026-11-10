@@ -241,38 +241,17 @@ fun SettingsDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = when (uiState.noiseReductionMode) {
-                                    NoiseReductionMode.OFF -> "OFF"
-                                    NoiseReductionMode.FAST -> "+1"
-                                    NoiseReductionMode.HIGH_QUALITY -> "+2"
-                                },
-                                color = if (isNrActive) Color(0xFFE11D48) else Color(0xFFFAFAFA),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            if (isNrActive) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(shape)
-                                        .background(Color(0xFFE11D48))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = uiState.noiseReductionMode.label,
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = when (uiState.noiseReductionMode) {
+                                NoiseReductionMode.OFF -> "OFF"
+                                NoiseReductionMode.FAST -> "MIN"
+                                NoiseReductionMode.HIGH_QUALITY -> "HQ"
+                            },
+                            color = if (isNrActive) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
 
                     // Sharpness
@@ -297,38 +276,17 @@ fun SettingsDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = when (uiState.sharpnessMode) {
-                                    SharpnessMode.OFF -> "OFF"
-                                    SharpnessMode.NORMAL -> "0"
-                                    SharpnessMode.HIGH -> "+1"
-                                },
-                                color = if (isSharpActive) Color(0xFFE11D48) else Color(0xFFFAFAFA),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            if (isSharpActive) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(shape)
-                                        .background(Color(0xFFE11D48))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = uiState.sharpnessMode.label,
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = when (uiState.sharpnessMode) {
+                                SharpnessMode.OFF -> "OFF"
+                                SharpnessMode.NORMAL -> "0"
+                                SharpnessMode.HIGH -> "+1"
+                            },
+                            color = if (isSharpActive) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
 

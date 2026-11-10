@@ -18,8 +18,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -42,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -383,17 +387,51 @@ private fun ZoomablePhotoItem(
             }
             .pointerInput(Unit) {
                 // 1:1 Instant finger-tracking pinch-to-zoom (zero spring delay)
-                detectTransformGestures { _, pan, zoom, _ ->
-                    if (zoom != 1f || scaleAnim.value > 1.05f) {
+                // When at 1x with 1 finger, touch events are NOT consumed so HorizontalPager swipes seamlessly!
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var isPinching = false
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedPointers = event.changes.filter { it.pressed }
+                        val isZoomed = scaleAnim.value > 1.05f
+
+                        if (pressedPointers.size >= 2) {
+                            isPinching = true
+                        }
+
+                        if (isPinching || isZoomed) {
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+
+                            if (zoomChange != 1f || (isZoomed && panChange != Offset.Zero)) {
+                                val currentScale = scaleAnim.value
+                                val newScale = (currentScale * zoomChange).coerceIn(1f, 5f)
+                                val maxPanX = (newScale - 1f) * size.width / 2f
+                                val maxPanY = (newScale - 1f) * size.height / 2f
+                                val newX = (offsetXAnim.value + panChange.x).coerceIn(-maxPanX, maxPanX)
+                                val newY = (offsetYAnim.value + panChange.y).coerceIn(-maxPanY, maxPanY)
+
+                                coroutineScope.launch {
+                                    scaleAnim.snapTo(newScale)
+                                    offsetXAnim.snapTo(if (newScale <= 1.05f) 0f else newX)
+                                    offsetYAnim.snapTo(if (newScale <= 1.05f) 0f else newY)
+                                }
+
+                                event.changes.forEach {
+                                    if (it.positionChanged()) {
+                                        it.consume()
+                                    }
+                                }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+
+                    if (scaleAnim.value <= 1.05f && (scaleAnim.value != 1f || offsetXAnim.value != 0f || offsetYAnim.value != 0f)) {
                         coroutineScope.launch {
-                            val newScale = (scaleAnim.value * zoom).coerceIn(1f, 5f)
-                            scaleAnim.snapTo(newScale)
-                            val maxPanX = (newScale - 1f) * size.width / 2f
-                            val maxPanY = (newScale - 1f) * size.height / 2f
-                            val newX = (offsetXAnim.value + pan.x).coerceIn(-maxPanX, maxPanX)
-                            val newY = (offsetYAnim.value + pan.y).coerceIn(-maxPanY, maxPanY)
-                            offsetXAnim.snapTo(newX)
-                            offsetYAnim.snapTo(newY)
+                            scaleAnim.animateTo(1f, spring(stiffness = Spring.StiffnessMedium))
+                            offsetXAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                            offsetYAnim.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
                         }
                     }
                 }
