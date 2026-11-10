@@ -130,6 +130,11 @@ class Camera2Controller(
     var lastMeasuredIso = 100
     var lastMeasuredShutter = 10_000_000L
 
+    var minShutterLimitNanos: Long? = null
+    var maxIsoLimit: Int? = null
+    private var isProbingAe = false
+    private var limitCheckCounter = 0
+
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
     val capabilities: StateFlow<HardwareCapabilities?> = _capabilities.asStateFlow()
 
@@ -386,6 +391,36 @@ class Camera2Controller(
             lastMeasuredIso = iso
             lastMeasuredShutter = shutter
             onFrameMetadata(iso, shutter)
+
+            if ((currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM) &&
+                (minShutterLimitNanos != null || maxIsoLimit != null)) {
+                if (isProbingAe) {
+                    isProbingAe = false
+                    applyAllSettingsInternal()
+                } else {
+                    limitCheckCounter++
+                    if (limitCheckCounter >= 45) {
+                        limitCheckCounter = 0
+                        probeHardwareAe()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun probeHardwareAe() {
+        val builder = previewRequestBuilder ?: return
+        val session = captureSession ?: return
+        val chars = currentCharacteristics ?: return
+        try {
+            isProbingAe = true
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            val evRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+            val validEv = if (evRange != null) currentEvIndex.coerceIn(evRange.lower, evRange.upper) else 0
+            builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
+            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+        } catch (e: Exception) {
+            isProbingAe = false
         }
     }
 
@@ -544,7 +579,9 @@ class Camera2Controller(
         zoomRatio: Float,
         flashMode: FlashMode,
         noiseReduction: NoiseReductionMode,
-        sharpness: SharpnessMode
+        sharpness: SharpnessMode,
+        minShutterLimitNanos: Long? = null,
+        maxIsoLimit: Int? = null
     ) {
         this.currentExposureMode = exposureMode
         this.currentIso = iso
@@ -558,6 +595,8 @@ class Camera2Controller(
         this.currentFlashMode = flashMode
         this.currentNoiseReduction = noiseReduction
         this.currentSharpness = sharpness
+        this.minShutterLimitNanos = minShutterLimitNanos
+        this.maxIsoLimit = maxIsoLimit
 
         applyAllSettingsInternal()
     }
@@ -602,12 +641,33 @@ class Camera2Controller(
             val maxDiopters = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
             val validFocus = currentFocusDistance.coerceIn(0f, maxDiopters)
 
-            // 2. Exposure Mode calculation (Fixing dark preview bug!)
+            // 2. Exposure Mode calculation (Fixing dark preview bug & Auto Limits)
             when (currentExposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
-                    // Fully automated AE with user EV compensation
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
+                    val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
+                    val isShutterViolated = minShutterLimitNanos != null && lastMeasuredShutter > minShutterLimitNanos!!
+                    val isIsoViolated = maxIsoLimit != null && lastMeasuredIso > effectiveMaxIso
+
+                    if (isShutterViolated || isIsoViolated) {
+                        // User-defined Auto limits breached -> intervene with manual override to protect shutter/ISO bounds
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                        val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+
+                        if (isShutterViolated) {
+                            val enforcedShutter = minShutterLimitNanos!!.coerceIn(minShutter, maxShutter)
+                            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, enforcedShutter)
+                            val dynIso = (targetExposure / enforcedShutter.toDouble()).toInt().coerceIn(minIso, effectiveMaxIso)
+                            builder.set(CaptureRequest.SENSOR_SENSITIVITY, dynIso)
+                        } else {
+                            builder.set(CaptureRequest.SENSOR_SENSITIVITY, effectiveMaxIso)
+                            val dynShutter = (targetExposure / effectiveMaxIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
+                        }
+                    } else {
+                        // Fully automated AE with user EV compensation
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
+                    }
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
                     // Lock Shutter, dynamically balance ISO using current scene brightness

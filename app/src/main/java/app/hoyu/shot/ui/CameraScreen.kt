@@ -402,6 +402,9 @@ fun CameraScreen(
                         title = "SEC // SHUTTER",
                         items = shutterSpeeds,
                         selectedItem = uiState.shutterSpeedNanos.coerceIn(minShutter, maxShutter),
+                        limitItem = uiState.minShutterLimitNanos,
+                        onItemLongClick = { nanos -> viewModel.toggleShutterLimit(nanos) },
+                        footerNote = "TIP // Long-press a shutter speed to set as Minimum Shutter Limit (L) for Auto mode.",
                         rotationDegrees = animatedRotation,
                         onItemSelected = { nanos ->
                             viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
@@ -423,6 +426,9 @@ fun CameraScreen(
                         title = "ISO // SENSOR",
                         items = isoValues,
                         selectedItem = uiState.iso.coerceIn(minIso, maxIso),
+                        limitItem = uiState.maxIsoLimit,
+                        onItemLongClick = { iso -> viewModel.toggleIsoLimit(iso) },
+                        footerNote = "TIP // Long-press an ISO to set as Maximum ISO Ceiling (L) for Auto mode.",
                         rotationDegrees = animatedRotation,
                         onItemSelected = { iso ->
                             viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)

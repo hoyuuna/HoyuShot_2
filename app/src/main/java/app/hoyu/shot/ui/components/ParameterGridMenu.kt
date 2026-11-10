@@ -8,9 +8,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,12 +32,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun <T> ParameterGridMenu(
     visible: Boolean,
     title: String,
     items: List<T>,
     selectedItem: T?,
+    limitItem: T? = null,
+    onItemLongClick: ((T) -> Unit)? = null,
+    footerNote: String? = null,
     rotationDegrees: Float = 0f,
     onItemSelected: (T) -> Unit,
     formatItem: (T) -> String,
@@ -200,14 +206,20 @@ fun <T> ParameterGridMenu(
                         ) {
                             pair.forEach { item ->
                                 val isSelected = !isAutoSelected && item == selectedItem
+                                val isLimited = item == limitItem
                                 val itemBgColor by animateColorAsState(
                                     targetValue = if (isSelected) Color(0x33E11D48) else Color(0xFF18181B),
                                     label = "itemBg"
                                 )
                                 val itemBorderColor by animateColorAsState(
-                                    targetValue = if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                    targetValue = when {
+                                        isLimited -> Color(0xFFE11D48)
+                                        isSelected -> Color(0xFFE11D48)
+                                        else -> Color(0xFF27272A)
+                                    },
                                     label = "itemBorder"
                                 )
+                                val itemBorderWidth = if (isLimited) 1.5.dp else 1.dp
 
                                 Box(
                                     modifier = Modifier
@@ -215,12 +227,21 @@ fun <T> ParameterGridMenu(
                                         .height(38.dp)
                                         .clip(shape)
                                         .background(itemBgColor)
-                                        .border(1.dp, itemBorderColor, shape)
-                                        .clickable {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                            touchReleaseEpoch = System.currentTimeMillis()
-                                            onItemSelected(item)
-                                        }
+                                        .border(itemBorderWidth, itemBorderColor, shape)
+                                        .combinedClickable(
+                                            onClick = {
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                touchReleaseEpoch = System.currentTimeMillis()
+                                                onItemSelected(item)
+                                            },
+                                            onLongClick = if (onItemLongClick != null) {
+                                                {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                    touchReleaseEpoch = System.currentTimeMillis()
+                                                    onItemLongClick(item)
+                                                }
+                                            } else null
+                                        )
                                         .padding(horizontal = 10.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -229,13 +250,27 @@ fun <T> ParameterGridMenu(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = formatItem(item),
-                                            color = if (isSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Text(
+                                                text = formatItem(item),
+                                                color = if (isSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected || isLimited) FontWeight.Black else FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                            if (isLimited) {
+                                                Text(
+                                                    text = "L",
+                                                    color = Color(0xFFE11D48),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                        }
                                         if (isSelected) {
                                             Box(
                                                 modifier = Modifier
@@ -251,6 +286,19 @@ fun <T> ParameterGridMenu(
                                 Spacer(modifier = Modifier.weight(1f))
                             }
                         }
+                    }
+
+                    if (footerNote != null) {
+                        Text(
+                            text = footerNote,
+                            color = Color(0xFF71717A),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, bottom = 2.dp)
+                        )
                     }
                 }
             }

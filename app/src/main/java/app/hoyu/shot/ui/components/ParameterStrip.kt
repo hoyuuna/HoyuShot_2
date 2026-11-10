@@ -85,6 +85,7 @@ fun HorizontalParameterStrip(
             value = shutterText,
             isActive = isShutterActive,
             isManual = isShutterManual,
+            hasLimit = uiState.minShutterLimitNanos != null,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -97,6 +98,7 @@ fun HorizontalParameterStrip(
             value = isoText,
             isActive = isIsoActive,
             isManual = isIsoManual,
+            hasLimit = uiState.maxIsoLimit != null,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -125,6 +127,7 @@ private fun StripItem(
     value: String,
     isActive: Boolean,
     isManual: Boolean,
+    hasLimit: Boolean = false,
     rotationDegrees: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -177,6 +180,15 @@ private fun StripItem(
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
                 )
+                if (hasLimit) {
+                    Text(
+                        text = "L",
+                        color = Color(0xFFE11D48),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 if (isManual && !isActive) {
                     Box(
                         modifier = Modifier

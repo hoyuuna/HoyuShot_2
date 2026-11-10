@@ -56,6 +56,12 @@ A professional manual DSLR camera application for Android, built natively with *
 * **In-Place Upgrades:** Background progress download and direct installation via Android `FileProvider`.
 * **Pre-Release Channel:** Opt-in toggle to receive early builds directly from GitHub CI/CD.
 
+### 10. Semi-Auto Exposure Bounds (Auto ISO Min Shutter & Max ISO Limit)
+* **Auto ISO Minimum Shutter Speed (`SEC L`):** Long-press any shutter preset (e.g. `1/500s`) to set a minimum shutter speed floor in Auto mode. Guarantees sharp, blur-free motion freeze when shooting vehicles or moving objects without dropping below the threshold.
+* **Auto ISO Maximum Ceiling (`ISO L`):** Long-press any ISO preset (e.g. `800` or `1600`) to cap sensor gain and preserve image quality.
+* **Clean Visual Indicators:** Minimalist red `L` indicator on parameter strip (`SEC L`, `ISO L`) and dedicated red outline in popup menus.
+* **Auto-Clear on Manual Overrides:** Switching to `S`, `ISO`, or `M` automatically releases the corresponding limit ("manual cancels limit").
+
 ---
 
 ## Technical Architecture
@@ -73,7 +79,7 @@ A professional manual DSLR camera application for Android, built natively with *
 Download the latest release APK from the GitHub Releases page:
 
 - **Latest Release:** [HoyuShot Releases](https://github.com/hoyuuna/HoyuShot_2/releases)
-- **Direct Download (v0.0.33):** [HoyuShot-v0.0.33.apk](https://github.com/hoyuuna/HoyuShot_2/releases/download/v0.0.33/HoyuShot-v0.0.33.apk)
+- **Direct Download (v0.0.34):** [HoyuShot-v0.0.34.apk](https://github.com/hoyuuna/HoyuShot_2/releases/download/v0.0.34/HoyuShot-v0.0.34.apk)
 
 ---
 

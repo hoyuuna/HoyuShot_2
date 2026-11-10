@@ -847,6 +847,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(isCameraReady = false) }
     }
 
+    fun toggleShutterLimit(nanos: Long) {
+        val currentLimit = _uiState.value.minShutterLimitNanos
+        val newLimit = if (currentLimit == nanos) null else nanos
+        _uiState.update { it.copy(minShutterLimitNanos = newLimit, exposureMode = ExposureMode.AUTO) }
+        applyCurrentSettings()
+    }
+
+    fun toggleIsoLimit(iso: Int) {
+        val currentLimit = _uiState.value.maxIsoLimit
+        val newLimit = if (currentLimit == iso) null else iso
+        _uiState.update { it.copy(maxIsoLimit = newLimit, exposureMode = ExposureMode.AUTO) }
+        applyCurrentSettings()
+    }
+
     fun setExposureMode(mode: ExposureMode) {
         val currActualIso = _uiState.value.actualIso.coerceAtLeast(50)
         val currActualShutter = _uiState.value.actualShutterSpeedNanos.coerceAtLeast(500_000L)
@@ -855,7 +869,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             current.copy(
                 exposureMode = mode,
                 iso = if (mode == ExposureMode.MANUAL || mode == ExposureMode.ISO_PRIORITY || current.iso <= 50) currActualIso else current.iso,
-                shutterSpeedNanos = if (mode == ExposureMode.MANUAL || mode == ExposureMode.SHUTTER_PRIORITY || current.shutterSpeedNanos <= 500_000L) currActualShutter else current.shutterSpeedNanos
+                shutterSpeedNanos = if (mode == ExposureMode.MANUAL || mode == ExposureMode.SHUTTER_PRIORITY || current.shutterSpeedNanos <= 500_000L) currActualShutter else current.shutterSpeedNanos,
+                minShutterLimitNanos = if (mode == ExposureMode.SHUTTER_PRIORITY || mode == ExposureMode.MANUAL) null else current.minShutterLimitNanos,
+                maxIsoLimit = if (mode == ExposureMode.ISO_PRIORITY || mode == ExposureMode.MANUAL) null else current.maxIsoLimit
             )
         }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedExposureMode = mode.name
@@ -865,7 +881,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setIso(iso: Int) {
         val caps = _uiState.value.capabilities
         val clamped = caps?.isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso
-        _uiState.update { it.copy(iso = clamped) }
+        _uiState.update { it.copy(iso = clamped, maxIsoLimit = null) }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedIso = clamped
         applyCurrentSettings()
     }
@@ -873,7 +889,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setShutterSpeedNanos(nanos: Long) {
         val caps = _uiState.value.capabilities
         val clamped = caps?.shutterSpeedRangeNanos?.let { nanos.coerceIn(it.lower, it.upper) } ?: nanos
-        _uiState.update { it.copy(shutterSpeedNanos = clamped) }
+        _uiState.update { it.copy(shutterSpeedNanos = clamped, minShutterLimitNanos = null) }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedShutterNanos = clamped
         applyCurrentSettings()
     }
@@ -993,7 +1009,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             zoomRatio = effectiveHardwareZoom,
             flashMode = s.flashMode,
             noiseReduction = s.noiseReductionMode,
-            sharpness = s.sharpnessMode
+            sharpness = s.sharpnessMode,
+            minShutterLimitNanos = s.minShutterLimitNanos,
+            maxIsoLimit = s.maxIsoLimit
         )
     }
 

@@ -131,6 +131,10 @@ data class CameraUiState(
     val histogram: HistogramData = HistogramData(),
     val horizon: HorizonOrientation = HorizonOrientation(),
 
+    // Semi-Auto Bounds / Limits (Auto ISO Min Shutter Speed & Max ISO Limit)
+    val minShutterLimitNanos: Long? = null,
+    val maxIsoLimit: Int? = null,
+
     // UI Active parameter dial
     val activeDialParameter: DialParameter? = null
 )
