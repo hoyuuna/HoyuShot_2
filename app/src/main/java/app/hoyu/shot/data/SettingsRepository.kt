@@ -23,6 +23,32 @@ class SettingsRepository(context: Context) {
         get() = prefs.getLong("saved_shutter_nanos", 10_000_000L)
         set(value) = prefs.edit().putLong("saved_shutter_nanos", value).apply()
 
+    var savedMinShutterLimitNanos: Long?
+        get() {
+            val v = prefs.getLong("saved_min_shutter_limit", -1L)
+            return if (v > 0) v else null
+        }
+        set(value) {
+            if (value != null && value > 0) {
+                prefs.edit().putLong("saved_min_shutter_limit", value).apply()
+            } else {
+                prefs.edit().remove("saved_min_shutter_limit").apply()
+            }
+        }
+
+    var savedMaxIsoLimit: Int?
+        get() {
+            val v = prefs.getInt("saved_max_iso_limit", -1)
+            return if (v > 0) v else null
+        }
+        set(value) {
+            if (value != null && value > 0) {
+                prefs.edit().putInt("saved_max_iso_limit", value).apply()
+            } else {
+                prefs.edit().remove("saved_max_iso_limit").apply()
+            }
+        }
+
     var savedFocusDiopters: Float
         get() = prefs.getFloat("saved_focus_diopters", 0f)
         set(value) = prefs.edit().putFloat("saved_focus_diopters", value).apply()
