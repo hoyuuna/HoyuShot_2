@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,7 +47,7 @@ jobs:
             -PversionName=0.0.${{ github.run_number }} \
             --no-daemon --stacktrace
 
-      - name: Prepare Release APK Asset
+      - name: Prepare Release APK Asset & Changelog
         id: prepare_asset
         run: |
           VERSION="0.0.${{ github.run_number }}"
@@ -54,12 +61,27 @@ jobs:
           echo "apk_path=$TARGET_NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+          # Extract commit message for release notes
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [ -z "$COMMIT_MSG" ]; then
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+          fi
+
+          cat <<EOF > release_notes.md
+**Changelog:**
+$COMMIT_MSG
+
+| File | Platform |
+| :--- | :--- |
+| \`$TARGET_NAME\` | Android (Universal: ARM64, ARMv7, x86, x86_64 - Android 8.0+) |
+EOF
+
       - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v0.0.${{ github.run_number }}"
           name: "HoyuShot v0.0.${{ github.run_number }}"
-          body: ""
+          body_path: release_notes.md
           prerelease: true
           files: ${{ steps.prepare_asset.outputs.apk_path }}
         env:
