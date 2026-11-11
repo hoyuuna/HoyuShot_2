@@ -19,11 +19,20 @@ class HistogramAnalyzer {
     private var overlayFrameCounter = 0L
 
     @Synchronized
-    fun analyze(image: Image): HistogramData {
+    fun analyze(
+        image: Image,
+        computeRgb: Boolean = true,
+        spotScreenX: Float? = null,
+        spotScreenY: Float? = null,
+        sensorOrientation: Int = 90,
+        isFront: Boolean = false
+    ): HistogramData {
         lumaBins.fill(0)
-        redBins.fill(0)
-        greenBins.fill(0)
-        blueBins.fill(0)
+        if (computeRgb) {
+            redBins.fill(0)
+            greenBins.fill(0)
+            blueBins.fill(0)
+        }
 
         val planes = image.planes
         if (planes.isEmpty()) return HistogramData()
@@ -31,34 +40,114 @@ class HistogramAnalyzer {
         val yBuffer: ByteBuffer = planes[0].buffer
         val yRowStride = planes[0].rowStride
         val yPixelStride = planes[0].pixelStride
+        val yCap = yBuffer.remaining()
 
         val width = image.width
         val height = image.height
+        if (width <= 0 || height <= 0) return HistogramData()
+
+        // Map portrait screen Spot AE coordinate (if active) back into normalized sensor (rx, ry)
+        var spotRx = -1f
+        var spotRy = -1f
+        if (spotScreenX != null && spotScreenY != null) {
+            val sx = spotScreenX.coerceIn(0f, 1f)
+            val sy = spotScreenY.coerceIn(0f, 1f)
+            val normOrient = ((sensorOrientation % 360) + 360) % 360
+            when (normOrient) {
+                90 -> {
+                    spotRx = sy
+                    spotRy = if (isFront) sx else 1f - sx
+                }
+                270 -> {
+                    spotRx = 1f - sy
+                    spotRy = if (isFront) 1f - sx else sx
+                }
+                180 -> {
+                    spotRx = if (isFront) sx else 1f - sx
+                    spotRy = 1f - sy
+                }
+                else -> {
+                    spotRx = if (isFront) 1f - sx else sx
+                    spotRy = sy
+                }
+            }
+        }
+        val hasSpot = spotRx >= 0f && spotRy >= 0f
 
         // Downsample step to guarantee 60fps analysis without frame drops
         val step = 4
 
         var maxBinVal = 1
+        var weightedLumaSum = 0L
+        var totalWeight = 0L
+        var totalSamples = 0L
+        var highlightClipSamples = 0L
+        var shadowSamples = 0L
 
         for (row in 0 until height step step) {
+            val ry = row.toFloat() / height.toFloat()
+            val rowOff = row * yRowStride
             for (col in 0 until width step step) {
-                val yIndex = row * yRowStride + col * yPixelStride
-                if (yIndex < yBuffer.remaining()) {
+                val yIndex = rowOff + col * yPixelStride
+                if (yIndex < yCap) {
                     val yVal = yBuffer.get(yIndex).toInt() and 0xFF
                     lumaBins[yVal]++
                     if (lumaBins[yVal] > maxBinVal) {
                         maxBinVal = lumaBins[yVal]
                     }
+
+                    val rx = col.toFloat() / width.toFloat()
+                    val weight = if (hasSpot) {
+                        val dx = abs(rx - spotRx)
+                        val dy = abs(ry - spotRy)
+                        when {
+                            dx <= 0.14f && dy <= 0.14f -> 8L
+                            dx <= 0.28f && dy <= 0.28f -> 2L
+                            else -> 1L
+                        }
+                    } else {
+                        val dx = abs(rx - 0.5f)
+                        val dy = abs(ry - 0.5f)
+                        when {
+                            dx <= 0.18f && dy <= 0.18f -> 4L
+                            dx <= 0.30f && dy <= 0.30f -> 2L
+                            else -> 1L
+                        }
+                    }
+
+                    weightedLumaSum += yVal.toLong() * weight
+                    totalWeight += weight
+                    totalSamples++
+                    if (yVal >= 242) highlightClipSamples++
+                    if (yVal <= 18) shadowSamples++
                 }
             }
         }
 
-        // If planes have U and V, calculate RGB approximate distribution
-        if (planes.size >= 3) {
+        val weightedMean = if (totalWeight > 0L) weightedLumaSum.toDouble() / totalWeight.toDouble() else 120.0
+        var median = weightedMean
+        if (totalSamples > 0L) {
+            val half = totalSamples / 2L
+            var acc = 0L
+            for (i in 0..255) {
+                acc += lumaBins[i]
+                if (acc >= half) {
+                    median = i.toDouble()
+                    break
+                }
+            }
+        }
+        val highlightRatio = if (totalSamples > 0L) highlightClipSamples.toDouble() / totalSamples.toDouble() else 0.0
+        val shadowRatio = if (totalSamples > 0L) shadowSamples.toDouble() / totalSamples.toDouble() else 0.0
+
+        // If planes have U and V and caller needs RGB distribution, compute approximate RGB bins
+        if (computeRgb && planes.size >= 3) {
             val uBuffer = planes[1].buffer
             val vBuffer = planes[2].buffer
             val uRowStride = planes[1].rowStride
             val uPixelStride = planes[1].pixelStride
+            val uCap = uBuffer.remaining()
+            val vCap = vBuffer.remaining()
 
             for (row in 0 until height step (step * 2)) {
                 for (col in 0 until width step (step * 2)) {
@@ -67,7 +156,7 @@ class HistogramAnalyzer {
                     val uvCol = col / 2
                     val uvIdx = uvRow * uRowStride + uvCol * uPixelStride
 
-                    if (yIdx < yBuffer.remaining() && uvIdx < uBuffer.remaining() && uvIdx < vBuffer.remaining()) {
+                    if (yIdx < yCap && uvIdx < uCap && uvIdx < vCap) {
                         val y = (yBuffer.get(yIdx).toInt() and 0xFF) - 16
                         val u = (uBuffer.get(uvIdx).toInt() and 0xFF) - 128
                         val v = (vBuffer.get(uvIdx).toInt() and 0xFF) - 128
@@ -90,7 +179,11 @@ class HistogramAnalyzer {
             redBins = redBins.copyOf(),
             greenBins = greenBins.copyOf(),
             blueBins = blueBins.copyOf(),
-            maxCount = maxBinVal
+            maxCount = maxBinVal,
+            weightedMeanLuma = weightedMean,
+            medianLuma = median,
+            highlightClipRatio = highlightRatio,
+            shadowRatio = shadowRatio
         )
     }
 

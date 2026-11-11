@@ -155,20 +155,29 @@ class Camera2Controller(
 
     var currentAeMeteringRect: MeteringRectangle? = null
     var currentAfMeteringRect: MeteringRectangle? = null
+    @Volatile private var spotAeNormX: Float? = null
+    @Volatile private var spotAeNormY: Float? = null
     var isSpotAeActive: Boolean = false
     var jpegQuality: Int = 95
     var isMirrorSelfie: Boolean = false
     var antibandingMode: String = "AUTO"
     var cameraSoundMode: String = "VIBRATE"
 
-    var lastMeasuredIso = 100
-    var lastMeasuredShutter = 10_000_000L
+    @Volatile var lastMeasuredIso = 100
+    @Volatile var lastMeasuredShutter = 10_000_000L
 
     var minShutterLimitNanos: Long? = null
     var maxIsoLimit: Int? = null
     private var isExposureClamped = false
     private var currentClampedIso = 100
     private var currentClampedShutter = 10_000_000L
+    private var currentPriorityIso = 100
+    private var currentPriorityShutter = 10_000_000L
+    private var prevPriorityMode: ExposureMode? = null
+    private var prevLockedShutterForS: Long = 0L
+    private var prevLockedIsoForI: Int = 0
+    @Volatile private var aeMeteringSettleUntilMs = 0L
+    @Volatile private var lastMeteringAdjustMs = 0L
     private var clampReleaseCooldownUntilMs = 0L
     private var forceHardwareAeOnce = false
     private var lastHistogramFrameMs = 0L
@@ -214,12 +223,15 @@ class Camera2Controller(
     }
 
     private fun needsAnalysisStream(): Boolean {
+        val needPriorityMeter = !isAeLocked &&
+            (currentExposureMode == ExposureMode.SHUTTER_PRIORITY || currentExposureMode == ExposureMode.ISO_PRIORITY)
         val needClamp = !isAeLocked && isExposureClamped &&
             (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
         return isHistogramOverlayEnabled ||
             isPeakingOverlayEnabled ||
             isZebraOverlayEnabled ||
             isBlurBackdropNeeded ||
+            needPriorityMeter ||
             needClamp
     }
 
@@ -412,42 +424,47 @@ class Camera2Controller(
                     val image = reader.acquireLatestImage()
                     if (image != null) {
                         try {
+                            val needPriorityMeter = !isAeLocked &&
+                                (currentExposureMode == ExposureMode.SHUTTER_PRIORITY || currentExposureMode == ExposureMode.ISO_PRIORITY)
                             val needClampCheck = !isAeLocked && isExposureClamped &&
                                 (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
+                            val needMetering = needPriorityMeter || needClampCheck
                             val needOverlays = isPeakingOverlayEnabled || isZebraOverlayEnabled
                             val needBlur = isBlurBackdropNeeded
 
-                            if (!isHistogramOverlayEnabled && !needClampCheck && !needOverlays && !needBlur) {
+                            if (!isHistogramOverlayEnabled && !needMetering && !needOverlays && !needBlur) {
                                 return@setOnImageAvailableListener
-                            }
-
-                            val nowMs = System.currentTimeMillis()
-                            val clampTick = if (needClampCheck) {
-                                lumaCheckCounter++
-                                if (lumaCheckCounter >= 3) {
-                                    lumaCheckCounter = 0
-                                    true
-                                } else false
-                            } else false
-                            val shouldAnalyzeHist = clampTick || (isHistogramOverlayEnabled && nowMs - lastHistogramFrameMs >= 80L)
-                            if (shouldAnalyzeHist) {
-                                val hist = histogramAnalyzer.analyze(image)
-                                lastHistogramFrameMs = nowMs
-                                if (isHistogramOverlayEnabled) {
-                                    onHistogramReady(hist)
-                                }
-                                if (clampTick) {
-                                    backgroundHandler?.post {
-                                        if (isExposureClamped) {
-                                            adjustClampedExposure(hist)
-                                        }
-                                    }
-                                }
                             }
 
                             val cChars = currentCharacteristics
                             val sensorOrient = cChars?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                             val isFront = cChars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+
+                            val nowMs = System.currentTimeMillis()
+                            val meterTick = needMetering &&
+                                nowMs >= aeMeteringSettleUntilMs &&
+                                (nowMs - lastMeteringAdjustMs >= 110L)
+                            val shouldAnalyzeHist = meterTick || (isHistogramOverlayEnabled && nowMs - lastHistogramFrameMs >= 80L)
+                            if (shouldAnalyzeHist) {
+                                val hist = histogramAnalyzer.analyze(
+                                    image = image,
+                                    computeRgb = isHistogramOverlayEnabled,
+                                    spotScreenX = spotAeNormX,
+                                    spotScreenY = spotAeNormY,
+                                    sensorOrientation = sensorOrient,
+                                    isFront = isFront
+                                )
+                                lastHistogramFrameMs = nowMs
+                                if (isHistogramOverlayEnabled) {
+                                    onHistogramReady(hist)
+                                }
+                                if (meterTick) {
+                                    lastMeteringAdjustMs = nowMs
+                                    backgroundHandler?.post {
+                                        adjustClosedLoopExposure(hist)
+                                    }
+                                }
+                            }
 
                             if (needOverlays) {
                                 val overlay = histogramAnalyzer.analyzeOverlays(
@@ -654,20 +671,136 @@ class Camera2Controller(
         }
     }
 
-    private fun adjustClampedExposure(hist: HistogramData) {
+    /**
+     * Computes a harmonious linear-light exposure multiplier from weighted scene luminance,
+     * median midtone balance, EV compensation, and highlight clipping protection.
+     * Returns null if exposure is already within a stable deadband.
+     */
+    private fun computeExposureStepRatio(
+        hist: HistogramData,
+        chars: CameraCharacteristics
+    ): Double? {
+        val evStepRational = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP) ?: android.util.Rational(1, 3)
+        val evStepFloat = evStepRational.toFloat().let { if (it > 0f) it.toDouble() else (1.0 / 3.0) }
+        val evStops = currentEvIndex * evStepFloat
+        // 18% middle gray in sRGB gamma (~118/255), scaled in gamma 2.2 space per real stop of EV
+        val targetLuma = (118.0 * Math.pow(2.0, evStops / 2.2)).coerceIn(42.0, 200.0)
+
+        val baseLuma = 0.65 * hist.weightedMeanLuma + 0.35 * hist.medianLuma
+        var effectiveLuma = baseLuma
+
+        // Highlight protection & dynamic range harmony (avoid blowing out bright skies/highlights)
+        if (evStops <= 0.35) {
+            if (hist.highlightClipRatio > 0.03 && hist.shadowRatio < 0.35) {
+                val clipPenalty = ((hist.highlightClipRatio - 0.03) * 180.0).coerceIn(0.0, 38.0)
+                effectiveLuma = (baseLuma + clipPenalty).coerceAtMost(250.0)
+            } else if (hist.highlightClipRatio > 0.14) {
+                val clipPenalty = ((hist.highlightClipRatio - 0.14) * 120.0).coerceIn(0.0, 24.0)
+                effectiveLuma = (baseLuma + clipPenalty).coerceAtMost(250.0)
+            }
+        }
+        // Gentle shadow rescue when highlights are completely clean
+        if (hist.shadowRatio > 0.45 && hist.highlightClipRatio < 0.01 && effectiveLuma < targetLuma) {
+            val shadowLift = ((hist.shadowRatio - 0.45) * 28.0).coerceIn(0.0, 14.0)
+            effectiveLuma = (effectiveLuma - shadowLift).coerceAtLeast(8.0)
+        }
+
+        if (Math.abs(effectiveLuma - targetLuma) <= 5.5) {
+            return null
+        }
+
+        // Convert sRGB luma ratio to linear sensor exposure ratio (gamma ~2.2) with smooth damping
+        val linearRatio = Math.pow(targetLuma / effectiveLuma.coerceAtLeast(6.0), 2.2).coerceIn(0.32, 3.0)
+        val damping = if (linearRatio > 1.8 || linearRatio < 0.55) 0.72 else 0.58
+        return 1.0 + (linearRatio - 1.0) * damping
+    }
+
+    private fun adjustClosedLoopExposure(hist: HistogramData) {
+        if (isAeLocked) return
         val builder = previewRequestBuilder ?: return
         val session = captureSession ?: return
         val chars = currentCharacteristics ?: return
 
-        var sum = 0L
-        var count = 0L
-        for (i in 0..255) {
-            val c = hist.lumaBins[i].toLong()
-            sum += i * c
-            count += c
+        when (currentExposureMode) {
+            ExposureMode.SHUTTER_PRIORITY -> {
+                val shutterRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                val minShutter = shutterRange?.lower ?: 100_000L
+                val maxShutter = shutterRange?.upper ?: 1_000_000_000L
+                val validShutter = currentShutterNanos.coerceIn(minShutter, maxShutter)
+
+                // Strictly wait until the sensor confirms the user's chosen shutter has taken effect
+                val shutterTolerance = (validShutter / 8L).coerceAtLeast(100_000L)
+                if (Math.abs(lastMeasuredShutter - validShutter) > shutterTolerance) return
+
+                val stepRatio = computeExposureStepRatio(hist, chars) ?: return
+                val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val minIso = isoRange?.lower ?: 50
+                val maxIso = isoRange?.upper ?: 6400
+
+                val newIso = Math.round(currentPriorityIso.toDouble() * stepRatio).toInt().coerceIn(minIso, maxIso)
+                val isoDeltaThreshold = (currentPriorityIso / 30).coerceAtLeast(1)
+                if (Math.abs(newIso - currentPriorityIso) >= isoDeltaThreshold) {
+                    currentPriorityIso = newIso
+                    aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentPriorityIso)
+                    try {
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error updating S-mode ISO", e)
+                    }
+                }
+            }
+            ExposureMode.ISO_PRIORITY -> {
+                val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val minIso = isoRange?.lower ?: 50
+                val maxIso = isoRange?.upper ?: 6400
+                val validIso = currentIso.coerceIn(minIso, maxIso)
+
+                // Strictly wait until the sensor confirms the user's chosen ISO has taken effect
+                val isoTolerance = (validIso / 8).coerceAtLeast(8)
+                if (Math.abs(lastMeasuredIso - validIso) > isoTolerance) return
+
+                val stepRatio = computeExposureStepRatio(hist, chars) ?: return
+                val shutterRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                val minShutter = shutterRange?.lower ?: 100_000L
+                val maxShutter = shutterRange?.upper ?: 1_000_000_000L
+
+                val prevShutter = currentPriorityShutter
+                val newShutter = (prevShutter.toDouble() * stepRatio).toLong().coerceIn(minShutter, maxShutter)
+                val shutterDeltaThreshold = (prevShutter / 30L).coerceAtLeast(5_000L)
+                if (Math.abs(newShutter - prevShutter) >= shutterDeltaThreshold) {
+                    currentPriorityShutter = newShutter
+                    aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentPriorityShutter)
+                    if ((prevShutter <= 33_333_333L) != (newShutter <= 33_333_333L)) {
+                        selectPreviewFpsRange(chars, newShutter)?.let {
+                            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+                        }
+                    }
+                    try {
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error updating ISO-mode shutter", e)
+                    }
+                }
+            }
+            ExposureMode.AUTO, ExposureMode.PROGRAM -> {
+                if (isExposureClamped) {
+                    adjustClampedExposure(hist)
+                }
+            }
+            ExposureMode.MANUAL -> {}
         }
-        val avgLuma = if (count > 0) (sum / count).toDouble() else 128.0
-        val targetLuma = (120.0 * Math.pow(2.0, currentEvIndex / 3.0)).coerceIn(55.0, 185.0)
+    }
+
+    private fun adjustClampedExposure(hist: HistogramData) {
+        val builder = previewRequestBuilder ?: return
+        val session = captureSession ?: return
+        val chars = currentCharacteristics ?: return
 
         val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
         val minIso = isoRange?.lower ?: 50
@@ -681,18 +814,17 @@ class Camera2Controller(
 
         val currentExposure = currentClampedIso.coerceAtLeast(minIso).toDouble() *
             currentClampedShutter.coerceAtLeast(minShutter).toDouble()
-        val rawRatio = targetLuma / avgLuma.coerceAtLeast(8.0)
-        val damping = if (avgLuma > 200.0 || avgLuma < 40.0) 0.9 else 0.55
-        var stepRatio = 1.0 + (rawRatio - 1.0) * damping
-        if (avgLuma > 220.0) {
-            stepRatio = minOf(stepRatio, 0.35)
-        }
-        val desiredExposure = currentExposure * stepRatio
+        val rawStep = computeExposureStepRatio(hist, chars)
+        val desiredExposure = currentExposure * (rawStep ?: 1.0)
+        val evStepRational = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP) ?: android.util.Rational(1, 3)
+        val evStops = currentEvIndex * evStepRational.toFloat().let { if (it > 0f) it.toDouble() else (1.0 / 3.0) }
+        val targetLuma = (118.0 * Math.pow(2.0, evStops / 2.2)).coerceIn(42.0, 200.0)
+        val avgLuma = 0.65 * hist.weightedMeanLuma + 0.35 * hist.medianLuma
 
         if (minShutterLimitNanos != null) {
             val minPossibleExposure = minIso.toDouble() * effectiveMaxShutter.toDouble()
             // Scene is bright enough to shoot faster than minShutterLimit at minIso -> release back to hardware AE
-            if ((currentClampedIso <= minIso + 5 && avgLuma > targetLuma + 12.0) ||
+            if ((currentClampedIso <= minIso + 5 && avgLuma > targetLuma + 10.0) ||
                 desiredExposure < minPossibleExposure * 0.96
             ) {
                 isExposureClamped = false
@@ -702,11 +834,12 @@ class Camera2Controller(
                 return
             }
 
-            if (Math.abs(avgLuma - targetLuma) > 10.0 || currentClampedShutter != effectiveMaxShutter) {
-                val newIso = (desiredExposure / effectiveMaxShutter.toDouble()).toInt().coerceIn(minIso, effectiveMaxIso)
+            if (rawStep != null || currentClampedShutter != effectiveMaxShutter) {
+                val newIso = Math.round(desiredExposure / effectiveMaxShutter.toDouble()).toInt().coerceIn(minIso, effectiveMaxIso)
                 if (newIso != currentClampedIso || currentClampedShutter != effectiveMaxShutter) {
                     currentClampedShutter = effectiveMaxShutter
                     currentClampedIso = newIso
+                    aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
                     try {
@@ -720,7 +853,7 @@ class Camera2Controller(
             // Only ISO ceiling is active: release when bright enough for <= 1/60s well below maxIsoLimit
             val comfortThresholdExposure = effectiveMaxIso.toDouble() * 16_666_667.0 * 0.65
             if ((desiredExposure < comfortThresholdExposure && avgLuma > targetLuma + 10.0) ||
-                (currentClampedShutter <= minShutter + (minShutter / 10L) && avgLuma > targetLuma + 12.0)
+                (currentClampedShutter <= minShutter + (minShutter / 10L) && avgLuma > targetLuma + 10.0)
             ) {
                 isExposureClamped = false
                 forceHardwareAeOnce = true
@@ -729,13 +862,14 @@ class Camera2Controller(
                 return
             }
 
-            if (Math.abs(avgLuma - targetLuma) > 10.0 || currentClampedIso != effectiveMaxIso) {
+            if (rawStep != null || currentClampedIso != effectiveMaxIso) {
                 val newShutter = (desiredExposure / effectiveMaxIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
-                if (Math.abs(newShutter - currentClampedShutter) > (currentClampedShutter / 20L).coerceAtLeast(10_000L) ||
+                if (Math.abs(newShutter - currentClampedShutter) > (currentClampedShutter / 25L).coerceAtLeast(10_000L) ||
                     currentClampedIso != effectiveMaxIso
                 ) {
                     currentClampedIso = effectiveMaxIso
                     currentClampedShutter = newShutter
+                    aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
                     try {
@@ -758,6 +892,8 @@ class Camera2Controller(
         val session = captureSession ?: return
 
         try {
+            spotAeNormX = normX
+            spotAeNormY = normY
             if (normX != null && normY != null) {
                 val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                     ?: Rect(0, 0, 4000, 3000)
@@ -774,24 +910,37 @@ class Camera2Controller(
                 currentAeMeteringRect = rect
                 isSpotAeActive = true
                 builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(rect))
-                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
             } else {
                 currentAeMeteringRect = null
                 isSpotAeActive = false
                 builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
-                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
             }
-            session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    super.onCaptureCompleted(session, request, result)
-                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
-                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+
+            val isSoftwareMeterMode = isExposureClamped ||
+                currentExposureMode == ExposureMode.SHUTTER_PRIORITY ||
+                currentExposureMode == ExposureMode.ISO_PRIORITY
+            if (isSoftwareMeterMode) {
+                aeMeteringSettleUntilMs = 0L
+                lastMeteringAdjustMs = 0L
+                session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+            } else {
+                if (normX != null && normY != null) {
+                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
                 }
-            }, backgroundHandler)
+                session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: TotalCaptureResult
+                    ) {
+                        super.onCaptureCompleted(session, request, result)
+                        builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    }
+                }, backgroundHandler)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Spot AE metering failed", e)
         }
@@ -1044,22 +1193,54 @@ class Camera2Controller(
                 ExposureMode.SHUTTER_PRIORITY -> {
                     isExposureClamped = false
                     forceHardwareAeOnce = false
-                    // Lock Shutter, dynamically balance ISO using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
-                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
-                    val dynIso = (targetExposure / validShutter.toDouble()).toInt().coerceIn(minIso, maxIso)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, dynIso)
+
+                    if (prevPriorityMode != ExposureMode.SHUTTER_PRIORITY) {
+                        val initTargetExp = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble())
+                            .coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+                        currentPriorityIso = Math.round(initTargetExp / validShutter.toDouble()).toInt().coerceIn(minIso, maxIso)
+                        prevLockedShutterForS = validShutter
+                        aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                        lastMeteringAdjustMs = 0L
+                    } else if (prevLockedShutterForS != validShutter) {
+                        // Scale proportionally as initial guess, then meter the ACTUAL live frame at validShutter
+                        val prevExp = currentPriorityIso.toDouble() * prevLockedShutterForS.coerceAtLeast(1L).toDouble()
+                        currentPriorityIso = Math.round(prevExp / validShutter.toDouble()).toInt().coerceIn(minIso, maxIso)
+                        prevLockedShutterForS = validShutter
+                        aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                        lastMeteringAdjustMs = 0L
+                    } else {
+                        currentPriorityIso = currentPriorityIso.coerceIn(minIso, maxIso)
+                        lastMeteringAdjustMs = 0L
+                    }
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentPriorityIso)
                 }
                 ExposureMode.ISO_PRIORITY -> {
                     isExposureClamped = false
                     forceHardwareAeOnce = false
-                    // Lock ISO, dynamically balance Shutter using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
-                    val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
-                    val dynShutter = (targetExposure / validIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
+
+                    if (prevPriorityMode != ExposureMode.ISO_PRIORITY) {
+                        val initTargetExp = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble())
+                            .coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+                        currentPriorityShutter = (initTargetExp / validIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                        prevLockedIsoForI = validIso
+                        aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                        lastMeteringAdjustMs = 0L
+                    } else if (prevLockedIsoForI != validIso) {
+                        // Scale proportionally as initial guess, then meter the ACTUAL live frame at validIso
+                        val prevExp = prevLockedIsoForI.coerceAtLeast(1).toDouble() * currentPriorityShutter.toDouble()
+                        currentPriorityShutter = (prevExp / validIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                        prevLockedIsoForI = validIso
+                        aeMeteringSettleUntilMs = System.currentTimeMillis() + 140L
+                        lastMeteringAdjustMs = 0L
+                    } else {
+                        currentPriorityShutter = currentPriorityShutter.coerceIn(minShutter, maxShutter)
+                        lastMeteringAdjustMs = 0L
+                    }
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentPriorityShutter)
                 }
                 ExposureMode.MANUAL -> {
                     isExposureClamped = false
@@ -1070,6 +1251,7 @@ class Camera2Controller(
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
                 }
             }
+            prevPriorityMode = currentExposureMode
 
             // 3. Locks
             builder.set(CaptureRequest.CONTROL_AE_LOCK, isAeLocked)
@@ -1128,6 +1310,7 @@ class Camera2Controller(
             // 8. Target FPS Range for fluid viewfinder pacing (relaxed if shutter > 1/30s)
             val activePreviewShutter = when {
                 currentExposureMode == ExposureMode.MANUAL || currentExposureMode == ExposureMode.SHUTTER_PRIORITY -> validShutter
+                currentExposureMode == ExposureMode.ISO_PRIORITY -> currentPriorityShutter
                 isExposureClamped -> currentClampedShutter
                 else -> 0L
             }
@@ -1852,6 +2035,13 @@ class Camera2Controller(
         isCapturing = false
         isExposureClamped = false
         forceHardwareAeOnce = false
+        prevPriorityMode = null
+        prevLockedShutterForS = 0L
+        prevLockedIsoForI = 0
+        aeMeteringSettleUntilMs = 0L
+        lastMeteringAdjustMs = 0L
+        spotAeNormX = null
+        spotAeNormY = null
         clampReleaseCooldownUntilMs = 0L
         lastHistogramFrameMs = 0L
         lastFallbackProbeMs = 0L

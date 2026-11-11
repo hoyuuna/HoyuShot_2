@@ -8,7 +8,11 @@ data class HistogramData(
     val redBins: IntArray = IntArray(256),
     val greenBins: IntArray = IntArray(256),
     val blueBins: IntArray = IntArray(256),
-    val maxCount: Int = 1
+    val maxCount: Int = 1,
+    val weightedMeanLuma: Double = 120.0,
+    val medianLuma: Double = 120.0,
+    val highlightClipRatio: Double = 0.0,
+    val shadowRatio: Double = 0.0
 )
 
 data class ViewfinderOverlayData(
