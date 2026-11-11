@@ -109,6 +109,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        cameraController.onCaptureError = { msg ->
+            viewModelScope.launch {
+                _uiState.update { it.copy(errorMessage = msg, isCapturing = false, isLongExposing = false) }
+            }
+        }
+
         cameraController.onOverlayDataReady = { overlay ->
             _uiState.update { it.copy(overlayAnalysis = overlay) }
         }

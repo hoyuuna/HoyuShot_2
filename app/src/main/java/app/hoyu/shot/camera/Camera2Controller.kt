@@ -15,6 +15,7 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
@@ -26,6 +27,7 @@ import app.hoyu.shot.sensors.LocationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -55,6 +57,7 @@ class Camera2Controller(
     private var jpegImageReader: ImageReader? = null
     private var rawImageReader: ImageReader? = null
 
+    private var currentCameraId: String? = null
     private var currentCharacteristics: CameraCharacteristics? = null
     private val histogramAnalyzer = HistogramAnalyzer()
 
@@ -74,6 +77,7 @@ class Camera2Controller(
         }
     var onExposureCompleted: (() -> Unit)? = null
     var onLongExposureStateChanged: ((Boolean) -> Unit)? = null
+    var onCaptureError: ((String) -> Unit)? = null
     var onOverlayDataReady: ((ViewfinderOverlayData) -> Unit)? = null
     var onBlurredBackdropReady: ((androidx.compose.ui.graphics.ImageBitmap) -> Unit)? = null
     @Volatile var isPeakingOverlayEnabled: Boolean = false
@@ -89,13 +93,21 @@ class Camera2Controller(
         set(value) {
             if (field != value) {
                 field = value
-                val chars = currentCharacteristics
-                if (cameraDevice != null && chars != null) {
-                    val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    if (map != null) {
-                        setupRawImageReader(map)
-                        createCaptureSession()
+                val task = Runnable {
+                    val chars = currentCharacteristics
+                    if (cameraDevice != null && chars != null) {
+                        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        if (map != null) {
+                            setupRawImageReader(map, chars)
+                            createCaptureSession()
+                        }
                     }
+                }
+                val handler = backgroundHandler
+                if (handler != null && Looper.myLooper() != handler.looper) {
+                    handler.post(task)
+                } else {
+                    task.run()
                 }
             }
         }
@@ -187,6 +199,7 @@ class Camera2Controller(
         onPreviewSizeCalculated: (width: Int, height: Int) -> Unit
     ) {
         this.previewSurface = previewSurface
+        this.currentCameraId = cameraId
         startBackgroundThread()
 
         try {
@@ -266,17 +279,38 @@ class Camera2Controller(
         }
     }
 
-    private fun setupRawImageReader(map: android.hardware.camera2.params.StreamConfigurationMap) {
+    private fun doesSizeMatchSensorForDng(chars: CameraCharacteristics, width: Int, height: Int): Boolean {
+        val preCorr = chars.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE)
+        val pixelSize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+        val matchesPre = preCorr != null && preCorr.width() == width && preCorr.height() == height
+        val matchesPixel = pixelSize != null && pixelSize.width == width && pixelSize.height == height
+        return matchesPre || matchesPixel
+    }
+
+    private fun setupRawImageReader(
+        map: android.hardware.camera2.params.StreamConfigurationMap,
+        chars: CameraCharacteristics
+    ) {
         clearPendingRawBuffers()
         rawImageReader?.close()
         rawImageReader = null
         isRawStreamConfigured = false
         if (isRawCaptureEnabled) {
             val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR)
-            val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
-            if (largestRaw != null) {
+            val compatibleSizes = rawSizes?.filter { doesSizeMatchSensorForDng(chars, it.width, it.height) }
+            val chosenRaw = compatibleSizes?.maxByOrNull { it.width * it.height }
+                ?: rawSizes?.maxByOrNull { it.width * it.height }
+            val preCorr = chars.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE)
+            val pixelSize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+            Log.i(
+                TAG,
+                "setupRawImageReader cam=$currentCameraId chosen=${chosenRaw?.width}x${chosenRaw?.height} " +
+                    "all=${rawSizes?.joinToString { "${it.width}x${it.height}" }} " +
+                    "preCorr=${preCorr?.width()}x${preCorr?.height()} pixel=${pixelSize?.width}x${pixelSize?.height}"
+            )
+            if (chosenRaw != null) {
                 rawImageReader = ImageReader.newInstance(
-                    largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 4
+                    chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 4
                 ).apply {
                     setOnImageAvailableListener({ reader ->
                         while (true) {
@@ -302,15 +336,16 @@ class Camera2Controller(
 
                             val pair = matchedResult
                             if (pair != null) {
-                                val chars = currentCharacteristics
+                                val activeChars = currentCharacteristics
                                 try {
-                                    if (chars != null) {
-                                        saveDngImage(rawImage, chars, pair.first, pair.second)
+                                    if (activeChars != null) {
+                                        saveDngImage(rawImage, activeChars, pair.first, pair.second)
                                     }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed saving DNG on image arrival", e)
+                                } catch (t: Throwable) {
+                                    Log.e(TAG, "Failed saving DNG on image arrival", t)
+                                    onCaptureError?.invoke("RAW (DNG) save failed: ${t.message}")
                                 } finally {
-                                    rawImage.close()
+                                    try { rawImage.close() } catch (_: Exception) {}
                                 }
                             }
                         }
@@ -427,7 +462,7 @@ class Camera2Controller(
         }
 
         // 3. RAW_SENSOR stream (strictly allocated only when RAW is active)
-        setupRawImageReader(map)
+        setupRawImageReader(map, chars)
     }
 
     private fun createCaptureSession() {
@@ -1217,10 +1252,11 @@ class Camera2Controller(
                             if (img != null) {
                                 try {
                                     saveDngImage(img, chars, result, jpegOrientation)
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed saving matched DNG", e)
+                                } catch (t: Throwable) {
+                                    Log.e(TAG, "Failed saving matched DNG", t)
+                                    onCaptureError?.invoke("RAW (DNG) save failed: ${t.message}")
                                 } finally {
-                                    img.close()
+                                    try { img.close() } catch (_: Exception) {}
                                 }
                             }
                         }
@@ -1385,14 +1421,19 @@ class Camera2Controller(
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
-            }
-            if (loc != null) {
+            } else if (loc != null) {
                 put(MediaStore.Images.Media.LATITUDE, loc.latitude)
                 put(MediaStore.Images.Media.LONGITUDE, loc.longitude)
             }
         }
 
-        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        val uri = try {
+            context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed inserting JPEG MediaStore row", t)
+            tempFile.delete()
+            null
+        }
         uri?.let { destUri ->
             var writtenBytes = 0L
             try {
@@ -1439,12 +1480,58 @@ class Camera2Controller(
         }
     }
 
+    private fun resolveCharacteristicsForDng(
+        baseCharacteristics: CameraCharacteristics,
+        captureResult: TotalCaptureResult,
+        imageWidth: Int,
+        imageHeight: Int
+    ): CameraCharacteristics {
+        if (doesSizeMatchSensorForDng(baseCharacteristics, imageWidth, imageHeight)) {
+            return baseCharacteristics
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val activePhysId = captureResult.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+            if (!activePhysId.isNullOrBlank()) {
+                try {
+                    val physChars = cameraManager.getCameraCharacteristics(activePhysId)
+                    if (doesSizeMatchSensorForDng(physChars, imageWidth, imageHeight)) {
+                        Log.i(TAG, "Resolved DNG characteristics via activePhysicalId=$activePhysId (${imageWidth}x$imageHeight)")
+                        return physChars
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                for (physId in baseCharacteristics.physicalCameraIds) {
+                    try {
+                        val physChars = cameraManager.getCameraCharacteristics(physId)
+                        if (doesSizeMatchSensorForDng(physChars, imageWidth, imageHeight)) {
+                            Log.i(TAG, "Resolved DNG characteristics via physicalCameraIds=$physId (${imageWidth}x$imageHeight)")
+                            return physChars
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+        return baseCharacteristics
+    }
+
     private fun saveDngImage(
         image: android.media.Image,
         characteristics: CameraCharacteristics,
         captureResult: TotalCaptureResult,
         orientationDegrees: Int = lastJpegOrientation
     ) {
+        val dngChars = resolveCharacteristicsForDng(characteristics, captureResult, image.width, image.height)
+        val preCorr = dngChars.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE)
+        val pixelSize = dngChars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+        Log.i(
+            TAG,
+            "saveDngImage cam=$currentCameraId img=${image.width}x${image.height} fmt=${image.format} " +
+                "preCorr=${preCorr?.width()}x${preCorr?.height()} pixel=${pixelSize?.width}x${pixelSize?.height}"
+        )
+
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val count = photoCounter.incrementAndGet() % 10000
         val fileName = "RAW_${timeStamp}_${String.format(Locale.US, "%04d", count)}.dng"
@@ -1455,16 +1542,23 @@ class Camera2Controller(
             put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
-            }
-            if (loc != null) {
+            } else if (loc != null) {
                 put(MediaStore.Images.Media.LATITUDE, loc.latitude)
                 put(MediaStore.Images.Media.LONGITUDE, loc.longitude)
             }
         }
 
-        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        val uri = try {
+            context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed inserting DNG MediaStore row", t)
+            onCaptureError?.invoke("Failed to create DNG file in MediaStore: ${t.message}")
+            null
+        }
         uri?.let { destUri ->
             var writtenBytes = 0L
+            var saveError: Throwable? = null
+            var dngCreator: DngCreator? = null
             try {
                 context.contentResolver.openOutputStream(destUri)?.use { rawStream ->
                     val countingStream = object : java.io.FilterOutputStream(rawStream) {
@@ -1477,22 +1571,42 @@ class Camera2Controller(
                             writtenBytes += len
                         }
                     }
-                    val dngCreator = DngCreator(characteristics, captureResult)
-                    dngCreator.setOrientation(degreesToExifOrientation(orientationDegrees))
+                    val buffered = BufferedOutputStream(countingStream, 65536)
+                    dngCreator = DngCreator(dngChars, captureResult)
+                    dngCreator?.setOrientation(degreesToExifOrientation(orientationDegrees))
                     if (loc != null) {
-                        dngCreator.setLocation(loc)
+                        try {
+                            dngCreator?.setLocation(loc)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Skipping DNG GPS location tag", e)
+                        }
                     }
-                    dngCreator.writeImage(countingStream, image)
+                    dngCreator?.writeImage(buffered, image)
+                    buffered.flush()
                     countingStream.flush()
-                    dngCreator.close()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to write DNG image", e)
+            } catch (t: Throwable) {
+                saveError = t
+                Log.e(
+                    TAG,
+                    "Failed to write DNG image (cam=$currentCameraId img=${image.width}x${image.height} " +
+                        "preCorr=${preCorr?.width()}x${preCorr?.height()} pixel=${pixelSize?.width}x${pixelSize?.height})",
+                    t
+                )
+            } finally {
+                try { dngCreator?.close() } catch (_: Throwable) {}
             }
 
-            val apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+            if (saveError != null || writtenBytes <= 0L) {
+                try { context.contentResolver.delete(destUri, null, null) } catch (_: Exception) {}
+                val diag = "RAW (DNG) failed [${image.width}x${image.height} vs ${preCorr?.width()}x${preCorr?.height()}]: ${saveError?.message ?: "0 bytes"}"
+                onCaptureError?.invoke(diag)
+                return
+            }
+
+            val apertures = dngChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
             val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
-            val focalArr = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            val focalArr = dngChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
             val focalStr = if (focalArr != null && focalArr.isNotEmpty()) {
                 String.format(Locale.US, "%.1fmm", focalArr[0])
             } else {
@@ -1515,7 +1629,7 @@ class Camera2Controller(
                 focalLength = focalStr,
                 timestamp = System.currentTimeMillis(),
                 fileName = fileName,
-                fileSizeBytes = if (writtenBytes > 0L) writtenBytes else 24_000_000L,
+                fileSizeBytes = writtenBytes,
                 aperture = ap
             )
             onPhotoSaved(info)
