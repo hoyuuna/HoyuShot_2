@@ -81,6 +81,11 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean("saved_raw_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_raw_enabled", value).apply()
 
+    var savedCaptureFormat: String
+        get() = prefs.getString("saved_capture_format", null)
+            ?: if (savedRawEnabled) "RAW_JPEG" else "JPEG"
+        set(value) = prefs.edit().putString("saved_capture_format", value).apply()
+
     var savedGridMode: String
         get() = prefs.getString("saved_grid_mode", "NONE") ?: "NONE"
         set(value) = prefs.edit().putString("saved_grid_mode", value).apply()

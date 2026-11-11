@@ -19,7 +19,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -33,12 +35,16 @@ import kotlinx.coroutines.delay
 fun ModeDialSelectorModal(
     visible: Boolean,
     currentMode: ExposureMode,
+    isBlurEnabled: Boolean = true,
+    blurredBackdrop: ImageBitmap? = null,
+    previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
     onModeSelected: (ExposureMode) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
@@ -92,13 +98,19 @@ fun ModeDialSelectorModal(
                     },
                 contentAlignment = Alignment.Center
             ) {
-            Column(
+            PopupGlassContainer(
+                shape = shape,
+                isBlurEnabled = isBlurEnabled,
+                blurredBackdrop = blurredBackdrop,
+                previewBoundsInRoot = previewBoundsInRoot,
+                rotationDegrees = rotationDegrees,
                 modifier = Modifier
                     .width(280.dp)
                     .heightIn(max = 260.dp) // Safe bounds preventing overflow in landscape
-                    .clip(shape)
-                    .background(Color(0xF509090B)) // shadcn zinc-950
-                    .border(1.dp, Color(0xFF27272A), shape)
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -149,7 +161,7 @@ fun ModeDialSelectorModal(
                                     shape
                                 )
                                 .clickable {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onModeSelected(mode)
                                     onDismiss() // Selects and applies immediately!
                                 }
@@ -200,6 +212,7 @@ fun ModeDialSelectorModal(
                         }
                     }
                 }
+            }
             }
         }
         }

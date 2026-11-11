@@ -74,6 +74,17 @@ class Camera2Controller(
         }
     var onExposureCompleted: (() -> Unit)? = null
     var onLongExposureStateChanged: ((Boolean) -> Unit)? = null
+    var onOverlayDataReady: ((ViewfinderOverlayData) -> Unit)? = null
+    var onBlurredBackdropReady: ((androidx.compose.ui.graphics.ImageBitmap) -> Unit)? = null
+    @Volatile var isPeakingOverlayEnabled: Boolean = false
+    @Volatile var isZebraOverlayEnabled: Boolean = false
+    @Volatile var isBlurBackdropNeeded: Boolean = false
+    private var lastBackdropGeneratedMs: Long = 0L
+    var captureFormat: CaptureFormat = CaptureFormat.JPEG
+        set(value) {
+            field = value
+            isRawCaptureEnabled = (value == CaptureFormat.RAW || value == CaptureFormat.RAW_JPEG)
+        }
     var isRawCaptureEnabled: Boolean = false
         set(value) {
             if (field != value) {
@@ -88,6 +99,10 @@ class Camera2Controller(
                 }
             }
         }
+    private var isRawStreamConfigured = false
+    private val rawPairingLock = Any()
+    private val pendingRawImages = LinkedHashMap<Long, android.media.Image>()
+    private val pendingRawResults = LinkedHashMap<Long, Pair<TotalCaptureResult, Int>>()
     private var openRetryCount = 0
 
     fun hasLocationPermission(): Boolean = locationHelper.hasLocationPermission()
@@ -241,16 +256,66 @@ class Camera2Controller(
         }
     }
 
+    private fun clearPendingRawBuffers() {
+        synchronized(rawPairingLock) {
+            pendingRawImages.values.forEach { img ->
+                try { img.close() } catch (_: Exception) {}
+            }
+            pendingRawImages.clear()
+            pendingRawResults.clear()
+        }
+    }
+
     private fun setupRawImageReader(map: android.hardware.camera2.params.StreamConfigurationMap) {
+        clearPendingRawBuffers()
         rawImageReader?.close()
         rawImageReader = null
+        isRawStreamConfigured = false
         if (isRawCaptureEnabled) {
             val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR)
             val largestRaw = rawSizes?.maxByOrNull { it.width * it.height }
             if (largestRaw != null) {
                 rawImageReader = ImageReader.newInstance(
-                    largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 2
-                )
+                    largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 4
+                ).apply {
+                    setOnImageAvailableListener({ reader ->
+                        while (true) {
+                            val rawImage = try {
+                                reader.acquireNextImage()
+                            } catch (e: Exception) {
+                                null
+                            } ?: break
+
+                            val ts = rawImage.timestamp
+                            var matchedResult: Pair<TotalCaptureResult, Int>? = null
+                            synchronized(rawPairingLock) {
+                                matchedResult = pendingRawResults.remove(ts)
+                                if (matchedResult == null) {
+                                    // Result hasn't arrived yet: buffer image by timestamp
+                                    while (pendingRawImages.size >= 3) {
+                                        val oldestKey = pendingRawImages.keys.firstOrNull() ?: break
+                                        try { pendingRawImages.remove(oldestKey)?.close() } catch (_: Exception) {}
+                                    }
+                                    pendingRawImages[ts] = rawImage
+                                }
+                            }
+
+                            val pair = matchedResult
+                            if (pair != null) {
+                                val chars = currentCharacteristics
+                                try {
+                                    if (chars != null) {
+                                        saveDngImage(rawImage, chars, pair.first, pair.second)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed saving DNG on image arrival", e)
+                                } finally {
+                                    rawImage.close()
+                                }
+                            }
+                        }
+                    }, backgroundHandler)
+                }
             }
         }
     }
@@ -270,8 +335,35 @@ class Camera2Controller(
                     if (image != null) {
                         try {
                             val hist = histogramAnalyzer.analyze(image)
-                            lastHistogramFrameMs = System.currentTimeMillis()
+                            val nowMs = System.currentTimeMillis()
+                            lastHistogramFrameMs = nowMs
                             onHistogramReady(hist)
+
+                            val cChars = currentCharacteristics
+                            val sensorOrient = cChars?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+                            val isFront = cChars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+
+                            if (isPeakingOverlayEnabled || isZebraOverlayEnabled) {
+                                val overlay = histogramAnalyzer.analyzeOverlays(
+                                    image = image,
+                                    sensorOrientation = sensorOrient,
+                                    isFront = isFront,
+                                    computePeaking = isPeakingOverlayEnabled,
+                                    computeZebra = isZebraOverlayEnabled
+                                )
+                                onOverlayDataReady?.invoke(overlay)
+                            }
+
+                            if (isBlurBackdropNeeded && nowMs - lastBackdropGeneratedMs >= 70L) {
+                                lastBackdropGeneratedMs = nowMs
+                                histogramAnalyzer.generateBlurredBackdrop(
+                                    image = image,
+                                    sensorOrientation = sensorOrient,
+                                    isFront = isFront
+                                )?.let { bmp ->
+                                    onBlurredBackdropReady?.invoke(bmp)
+                                }
+                            }
 
                             if (!isAeLocked && isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
                                 lumaCheckCounter++
@@ -343,10 +435,11 @@ class Camera2Controller(
         val pSurface = previewSurface ?: return
 
         try {
+            val includeRawInPrimary = isRawCaptureEnabled && rawImageReader != null
             val surfaces = mutableListOf<Surface>().apply {
                 add(pSurface)
                 jpegImageReader?.surface?.let { add(it) }
-                if (isRawCaptureEnabled && rawImageReader != null) {
+                if (includeRawInPrimary) {
                     rawImageReader?.surface?.let { add(it) }
                 }
                 analysisImageReader?.surface?.let { add(it) }
@@ -360,16 +453,18 @@ class Camera2Controller(
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
                     captureSession = session
+                    isRawStreamConfigured = includeRawInPrimary
                     applyAllSettingsInternal()
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
                     Log.w(TAG, "Capture session configuration failed, attempting fallback without analysis stream")
                     try {
+                        val includeRawInFallback = isRawCaptureEnabled && rawImageReader != null
                         val fallbackSurfaces = mutableListOf<Surface>().apply {
                             add(pSurface)
                             jpegImageReader?.surface?.let { add(it) }
-                            if (isRawCaptureEnabled && rawImageReader != null) {
+                            if (includeRawInFallback) {
                                 rawImageReader?.surface?.let { add(it) }
                             }
                         }
@@ -379,6 +474,7 @@ class Camera2Controller(
                         device.createCaptureSession(fallbackSurfaces, object : CameraCaptureSession.StateCallback() {
                             override fun onConfigured(fbSession: CameraCaptureSession) {
                                 captureSession = fbSession
+                                isRawStreamConfigured = includeRawInFallback
                                 applyAllSettingsInternal()
                             }
                             override fun onConfigureFailed(s: CameraCaptureSession) {
@@ -387,6 +483,7 @@ class Camera2Controller(
                                     device.createCaptureSession(minimalSurfaces, object : CameraCaptureSession.StateCallback() {
                                         override fun onConfigured(minSession: CameraCaptureSession) {
                                             captureSession = minSession
+                                            isRawStreamConfigured = false
                                             applyAllSettingsInternal()
                                         }
                                         override fun onConfigureFailed(s2: CameraCaptureSession) {
@@ -980,15 +1077,15 @@ class Camera2Controller(
 
     private val photoCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
-    fun takeBurstPicture(captureRaw: Boolean) {
-        submitCaptureRequest(captureRaw = captureRaw, isBurst = true)
+    fun takeBurstPicture(captureRaw: Boolean, format: CaptureFormat = this.captureFormat) {
+        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = true)
     }
 
-    fun takePicture(captureRaw: Boolean) {
-        submitCaptureRequest(captureRaw = captureRaw, isBurst = false)
+    fun takePicture(captureRaw: Boolean, format: CaptureFormat = this.captureFormat) {
+        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = false)
     }
 
-    private fun submitCaptureRequest(captureRaw: Boolean, isBurst: Boolean) {
+    private fun submitCaptureRequest(captureRaw: Boolean, format: CaptureFormat, isBurst: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
         val chars = currentCharacteristics ?: return
@@ -1000,9 +1097,14 @@ class Camera2Controller(
 
         try {
             val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-            captureBuilder.addTarget(jpegImageReader!!.surface)
 
-            val willCaptureRaw = captureRaw && rawImageReader != null
+            val wantsRaw = captureRaw || format == CaptureFormat.RAW || format == CaptureFormat.RAW_JPEG
+            val willCaptureRaw = wantsRaw && isRawStreamConfigured && rawImageReader != null
+            val willCaptureJpeg = (format != CaptureFormat.RAW || !willCaptureRaw) && jpegImageReader != null
+
+            if (willCaptureJpeg) {
+                captureBuilder.addTarget(jpegImageReader!!.surface)
+            }
             if (willCaptureRaw) {
                 captureBuilder.addTarget(rawImageReader!!.surface)
             }
@@ -1098,19 +1200,30 @@ class Camera2Controller(
                     super.onCaptureCompleted(session, request, result)
 
                     if (willCaptureRaw) {
-                        rawImageReader?.setOnImageAvailableListener({ reader ->
-                            while (true) {
-                                val rawImage = try {
-                                    reader.acquireNextImage()
-                                } catch (e: Exception) {
-                                    null
-                                } ?: break
-                                backgroundHandler?.post {
-                                    saveDngImage(rawImage, chars, result)
-                                    rawImage.close()
+                        val ts = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                        if (ts != null) {
+                            var matchedImage: android.media.Image? = null
+                            synchronized(rawPairingLock) {
+                                matchedImage = pendingRawImages.remove(ts)
+                                if (matchedImage == null) {
+                                    while (pendingRawResults.size >= 6) {
+                                        val oldestKey = pendingRawResults.keys.firstOrNull() ?: break
+                                        pendingRawResults.remove(oldestKey)
+                                    }
+                                    pendingRawResults[ts] = Pair(result, jpegOrientation)
                                 }
                             }
-                        }, backgroundHandler)
+                            val img = matchedImage
+                            if (img != null) {
+                                try {
+                                    saveDngImage(img, chars, result, jpegOrientation)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed saving matched DNG", e)
+                                } finally {
+                                    img.close()
+                                }
+                            }
+                        }
                     }
 
                     isCapturing = false
@@ -1247,8 +1360,15 @@ class Camera2Controller(
                 exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, loc.provider ?: "GPS")
             }
             exif.setAttribute(ExifInterface.TAG_ORIENTATION, finalExifOrientation.toString())
-            exif.setAttribute(ExifInterface.TAG_MAKE, "Xiaomi")
-            exif.setAttribute(ExifInterface.TAG_MODEL, "Xiaomi 13")
+            val makeName = Build.MANUFACTURER.replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString()
+            }
+            if (makeName.isNotBlank()) {
+                exif.setAttribute(ExifInterface.TAG_MAKE, makeName)
+            }
+            if (!Build.MODEL.isNullOrBlank()) {
+                exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
+            }
             exif.saveAttributes()
 
             if (imgWidth <= 0 || imgHeight <= 0) {
@@ -1290,6 +1410,12 @@ class Camera2Controller(
             val chars = currentCharacteristics
             val apertures = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
             val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
+            val focalArr = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            val focalStr = if (focalArr != null && focalArr.isNotEmpty()) {
+                String.format(Locale.US, "%.1fmm", focalArr[0])
+            } else {
+                "5.0mm"
+            }
 
             val shutterStr = HardwareCapabilities.formatShutterSpeed(
                 if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
@@ -1303,7 +1429,7 @@ class Camera2Controller(
                 height = if (isExifRotated) imgWidth else imgHeight,
                 iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
-                focalLength = "1x",
+                focalLength = focalStr,
                 timestamp = System.currentTimeMillis(),
                 fileName = fileName,
                 fileSizeBytes = writtenBytes,
@@ -1316,7 +1442,8 @@ class Camera2Controller(
     private fun saveDngImage(
         image: android.media.Image,
         characteristics: CameraCharacteristics,
-        captureResult: TotalCaptureResult
+        captureResult: TotalCaptureResult,
+        orientationDegrees: Int = lastJpegOrientation
     ) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val count = photoCounter.incrementAndGet() % 10000
@@ -1337,33 +1464,58 @@ class Camera2Controller(
 
         val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         uri?.let { destUri ->
-            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
-                val dngCreator = DngCreator(characteristics, captureResult)
-                dngCreator.setOrientation(degreesToExifOrientation(lastJpegOrientation))
-                if (loc != null) {
-                    dngCreator.setLocation(loc)
+            var writtenBytes = 0L
+            try {
+                context.contentResolver.openOutputStream(destUri)?.use { rawStream ->
+                    val countingStream = object : java.io.FilterOutputStream(rawStream) {
+                        override fun write(b: Int) {
+                            out.write(b)
+                            writtenBytes++
+                        }
+                        override fun write(b: ByteArray, off: Int, len: Int) {
+                            out.write(b, off, len)
+                            writtenBytes += len
+                        }
+                    }
+                    val dngCreator = DngCreator(characteristics, captureResult)
+                    dngCreator.setOrientation(degreesToExifOrientation(orientationDegrees))
+                    if (loc != null) {
+                        dngCreator.setLocation(loc)
+                    }
+                    dngCreator.writeImage(countingStream, image)
+                    countingStream.flush()
+                    dngCreator.close()
                 }
-                dngCreator.writeImage(outputStream, image)
-                dngCreator.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to write DNG image", e)
             }
 
             val apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
             val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
+            val focalArr = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            val focalStr = if (focalArr != null && focalArr.isNotEmpty()) {
+                String.format(Locale.US, "%.1fmm", focalArr[0])
+            } else {
+                "5.0mm"
+            }
 
             val shutterStr = HardwareCapabilities.formatShutterSpeed(
                 if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
             )
+            val exifOrientation = degreesToExifOrientation(orientationDegrees)
+            val isPortrait = exifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                exifOrientation == ExifInterface.ORIENTATION_ROTATE_270
             val info = CapturedPhotoInfo(
                 uriString = destUri.toString(),
                 isRaw = true,
-                width = image.width,
-                height = image.height,
+                width = if (isPortrait) image.height else image.width,
+                height = if (isPortrait) image.width else image.height,
                 iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
                 shutterSpeed = shutterStr,
-                focalLength = "1x",
+                focalLength = focalStr,
                 timestamp = System.currentTimeMillis(),
                 fileName = fileName,
-                fileSizeBytes = 24_000_000L,
+                fileSizeBytes = if (writtenBytes > 0L) writtenBytes else 24_000_000L,
                 aperture = ap
             )
             onPhotoSaved(info)
@@ -1371,6 +1523,8 @@ class Camera2Controller(
     }
 
     fun closeCamera() {
+        clearPendingRawBuffers()
+        isRawStreamConfigured = false
         isCapturing = false
         isExposureClamped = false
         forceHardwareAeOnce = false

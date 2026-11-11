@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Build
+import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,6 +71,9 @@ fun QuickThumbnail(
                     } else {
                         raw
                     }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Fallback for DNG / RAW files without a BitmapFactory-decodable preview
+                    bitmap = context.contentResolver.loadThumbnail(uri, Size(256, 256), null)
                 }
             } catch (e: Exception) {
                 // ignore

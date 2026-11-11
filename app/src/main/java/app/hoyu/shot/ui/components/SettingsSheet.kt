@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +37,7 @@ import app.hoyu.shot.model.TimerMode
 fun SettingsDialog(
     visible: Boolean,
     uiState: CameraUiState,
+    previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
     onToggleResumeSettings: () -> Unit,
     onToggleGeotagging: () -> Unit,
@@ -51,6 +53,7 @@ fun SettingsDialog(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
@@ -70,13 +73,19 @@ fun SettingsDialog(
                 modifier = Modifier.rotateBounds(rotationDegrees),
                 contentAlignment = Alignment.Center
             ) {
-            Column(
+            PopupGlassContainer(
+                shape = shape,
+                isBlurEnabled = uiState.isUiBlurEnabled,
+                blurredBackdrop = uiState.blurredBackdrop,
+                previewBoundsInRoot = previewBoundsInRoot,
+                rotationDegrees = rotationDegrees,
                 modifier = Modifier
                     .width(320.dp)
                     .heightIn(max = 340.dp)
-                    .clip(shape)
-                    .background(Color(0xF509090B)) // shadcn zinc-950
-                    .border(1.dp, Color(0xFF27272A), shape)
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
                     .padding(14.dp)
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -124,7 +133,7 @@ fun SettingsDialog(
                         .background(resumeBgColor)
                         .border(1.dp, resumeBorderColor, shape)
                         .clickable {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            view.triggerUiHaptic(uiHapticsEnabled)
                             onToggleResumeSettings()
                         }
                         .padding(12.dp),
@@ -182,7 +191,7 @@ fun SettingsDialog(
                         .background(geoBgColor)
                         .border(1.dp, geoBorderColor, shape)
                         .clickable {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            view.triggerUiHaptic(uiHapticsEnabled)
                             onToggleGeotagging()
                         }
                         .padding(12.dp),
@@ -236,7 +245,7 @@ fun SettingsDialog(
                             .background(if (isNrActive) Color(0x22E11D48) else Color(0xFF18181B))
                             .border(1.dp, if (isNrActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiHapticsEnabled)
                                 onCycleNoiseReduction()
                             }
                             .padding(10.dp)
@@ -271,7 +280,7 @@ fun SettingsDialog(
                             .background(if (isSharpActive) Color(0x22E11D48) else Color(0xFF18181B))
                             .border(1.dp, if (isSharpActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiHapticsEnabled)
                                 onCycleSharpness()
                             }
                             .padding(10.dp)
@@ -345,7 +354,7 @@ fun SettingsDialog(
                                         shape
                                     )
                                     .clickable {
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        view.triggerUiHaptic(uiHapticsEnabled)
                                         onSelectTimerMode(mode)
                                     }
                                     .padding(vertical = 8.dp),
@@ -402,7 +411,7 @@ fun SettingsDialog(
                         .background(Color(0xFF18181B))
                         .border(1.dp, Color(0xFF27272A), shape)
                         .clickable {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            view.triggerUiHaptic(uiHapticsEnabled)
                             onOpenAdvancedSettings()
                         }
                         .padding(10.dp),
@@ -435,6 +444,7 @@ fun SettingsDialog(
                     )
                 }
             }
+            }
         }
         }
     }
@@ -448,6 +458,7 @@ private fun ConfigToggleItem(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     Column(
         modifier = modifier
@@ -455,7 +466,7 @@ private fun ConfigToggleItem(
             .background(if (isActive) Color(0x33E11D48) else Color(0xFF18181B))
             .border(1.dp, if (isActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
             .clickable {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onClick()
             }
             .padding(vertical = 8.dp),

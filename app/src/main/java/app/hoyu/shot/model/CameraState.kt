@@ -1,6 +1,7 @@
 package app.hoyu.shot.model
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 
 data class HistogramData(
     val lumaBins: IntArray = IntArray(256),
@@ -8,6 +9,14 @@ data class HistogramData(
     val greenBins: IntArray = IntArray(256),
     val blueBins: IntArray = IntArray(256),
     val maxCount: Int = 1
+)
+
+data class ViewfinderOverlayData(
+    val cols: Int = 0,
+    val rows: Int = 0,
+    val peakingStrength: ByteArray = ByteArray(0),
+    val zebraMask: ByteArray = ByteArray(0),
+    val frameId: Long = 0L
 )
 
 data class HorizonOrientation(
@@ -131,6 +140,8 @@ data class CameraUiState(
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),
+    val overlayAnalysis: ViewfinderOverlayData = ViewfinderOverlayData(),
+    val blurredBackdrop: ImageBitmap? = null,
     val horizon: HorizonOrientation = HorizonOrientation(),
 
     // Semi-Auto Bounds / Limits (Auto ISO Min Shutter Speed & Max ISO Limit)

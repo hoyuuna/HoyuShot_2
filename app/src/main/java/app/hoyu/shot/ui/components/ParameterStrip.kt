@@ -30,6 +30,7 @@ fun HorizontalParameterStrip(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
 
     val isFocusActive = activeParam == DialParameter.FOCUS
     val isFocusManual = uiState.isManualFocusEnabled
@@ -75,7 +76,7 @@ fun HorizontalParameterStrip(
             isManual = isFocusManual,
             rotationDegrees = rotationDegrees,
             onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onParamClick(DialParameter.FOCUS)
             },
             modifier = Modifier.weight(1f)
@@ -88,7 +89,7 @@ fun HorizontalParameterStrip(
             hasLimit = uiState.minShutterLimitNanos != null,
             rotationDegrees = rotationDegrees,
             onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onParamClick(DialParameter.SHUTTER)
             },
             modifier = Modifier.weight(1f)
@@ -101,7 +102,7 @@ fun HorizontalParameterStrip(
             hasLimit = uiState.maxIsoLimit != null,
             rotationDegrees = rotationDegrees,
             onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onParamClick(DialParameter.ISO)
             },
             modifier = Modifier.weight(1f)
@@ -113,7 +114,7 @@ fun HorizontalParameterStrip(
             isManual = isWbManual,
             rotationDegrees = rotationDegrees,
             onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onParamClick(DialParameter.WHITE_BALANCE)
             },
             modifier = Modifier.weight(1f)

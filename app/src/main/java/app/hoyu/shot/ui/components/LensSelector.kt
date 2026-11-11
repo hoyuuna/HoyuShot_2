@@ -30,6 +30,7 @@ fun LensSelector(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val backLenses = lenses.filter { !it.isFront }
 
     Row(
@@ -50,7 +51,7 @@ fun LensSelector(
                     .clip(CircleShape)
                     .background(if (isSelected) Color(0xFFFFD600) else Color(0x22FFFFFF))
                     .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        view.triggerUiHaptic(uiHapticsEnabled)
                         onLensSelect(lens)
                     },
                 contentAlignment = Alignment.Center
@@ -72,7 +73,7 @@ fun LensSelector(
                 .clip(CircleShape)
                 .background(if (isFrontSelected) Color(0xFFFFD600) else Color(0x33FFFFFF))
                 .clickable {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    view.triggerUiHaptic(uiHapticsEnabled)
                     onFlipFacing()
                 },
             contentAlignment = Alignment.Center

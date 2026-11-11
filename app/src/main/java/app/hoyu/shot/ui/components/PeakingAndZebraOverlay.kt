@@ -7,27 +7,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import app.hoyu.shot.model.HistogramData
+import androidx.compose.ui.graphics.drawscope.clipRect
+import app.hoyu.shot.model.ViewfinderOverlayData
 
 @Composable
 fun PeakingAndZebraOverlay(
     isPeakingEnabled: Boolean,
     isZebraEnabled: Boolean,
-    histogram: HistogramData,
+    overlayData: ViewfinderOverlayData,
     modifier: Modifier = Modifier
 ) {
     if (!isPeakingEnabled && !isZebraEnabled) return
+    if (overlayData.cols <= 0 || overlayData.rows <= 0) return
 
     // Animated diagonal offset for Zebra stripes
     val infiniteTransition = rememberInfiniteTransition(label = "zebra")
     val zebraOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 40f,
+        targetValue = 28f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
+            animation = tween(700, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "offset"
@@ -36,63 +37,77 @@ fun PeakingAndZebraOverlay(
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
         val height = size.height
+        val cols = overlayData.cols
+        val rows = overlayData.rows
+        val cellW = width / cols
+        val cellH = height / rows
 
-        // 1. Zebra Stripes Pattern if scene has high clipping (> 240 luminance)
-        if (isZebraEnabled) {
-            val highLumaCount = histogram.lumaBins.takeLast(16).sum()
-            val totalLuma = histogram.lumaBins.sum().coerceAtLeast(1)
-            val clippingRatio = highLumaCount.toFloat() / totalLuma
+        // 1. Real Spatial Zebra Stripes strictly over overexposed highlight cells (>= 238 luma)
+        if (isZebraEnabled && overlayData.zebraMask.size == cols * rows) {
+            val stripeSpacing = 18f
+            val stripeColor = Color(0xBBFFFFFF)
+            val shadowStripeColor = Color(0x66000000)
+            val stripeWidth = 2.4f
 
-            // If more than 3% of the image is blowing out, highlight top highlights with diagonal stripes
-            if (clippingRatio > 0.03f) {
-                val stripeSpacing = 28f
-                val stripeColor = Color(0x77FFFFFF)
-                val stripeWidth = 2.5f
+            for (r in 0 until rows) {
+                var c = 0
+                while (c < cols) {
+                    if (overlayData.zebraMask[r * cols + c].toInt() != 0) {
+                        val startC = c
+                        while (c < cols && overlayData.zebraMask[r * cols + c].toInt() != 0) {
+                            c++
+                        }
+                        val left = startC * cellW
+                        val top = r * cellH
+                        val right = c * cellW
+                        val bottom = (r + 1) * cellH
 
-                var x = -height + zebraOffset
-                while (x < width + height) {
-                    drawLine(
-                        color = stripeColor,
-                        start = Offset(x, 0f),
-                        end = Offset(x + height * 0.7f, height),
-                        strokeWidth = stripeWidth
-                    )
-                    x += stripeSpacing
+                        clipRect(left = left, top = top, right = right, bottom = bottom) {
+                            var x = left - cellH + (zebraOffset % stripeSpacing)
+                            while (x < right + cellH) {
+                                drawLine(
+                                    color = shadowStripeColor,
+                                    start = Offset(x - 1.5f, bottom),
+                                    end = Offset(x + cellH - 1.5f, top),
+                                    strokeWidth = stripeWidth + 1.2f
+                                )
+                                drawLine(
+                                    color = stripeColor,
+                                    start = Offset(x, bottom),
+                                    end = Offset(x + cellH, top),
+                                    strokeWidth = stripeWidth
+                                )
+                                x += stripeSpacing
+                            }
+                        }
+                    } else {
+                        c++
+                    }
                 }
             }
         }
 
-        // 2. Focus Peaking visual indicator lines (High contrast focus edges in Neon Green)
-        if (isPeakingEnabled) {
-            // Draw discrete optical sharpness guides in neon green
-            val peakingColor = Color(0xFF00E676)
-            val centerX = width / 2f
-            val centerY = height / 2f
-
-            // Micro corner accents indicating peaking is active
-            val bracketSize = 40f
-            val stroke = Stroke(width = 1.5f)
-
-            // Center targeting brackets with neon glow
-            val path = Path().apply {
-                moveTo(centerX - bracketSize, centerY - bracketSize * 0.5f)
-                lineTo(centerX - bracketSize, centerY - bracketSize)
-                lineTo(centerX - bracketSize * 0.5f, centerY - bracketSize)
-
-                moveTo(centerX + bracketSize * 0.5f, centerY - bracketSize)
-                lineTo(centerX + bracketSize, centerY - bracketSize)
-                lineTo(centerX + bracketSize, centerY - bracketSize * 0.5f)
-
-                moveTo(centerX - bracketSize, centerY + bracketSize * 0.5f)
-                lineTo(centerX - bracketSize, centerY + bracketSize)
-                lineTo(centerX - bracketSize * 0.5f, centerY + bracketSize)
-
-                moveTo(centerX + bracketSize * 0.5f, centerY + bracketSize)
-                lineTo(centerX + bracketSize, centerY + bracketSize)
-                lineTo(centerX + bracketSize, centerY + bracketSize * 0.5f)
+        // 2. Real Focus Peaking highlights over sharp in-focus edge cells
+        if (isPeakingEnabled && overlayData.peakingStrength.size == cols * rows) {
+            val strokeW = (cellW * 0.22f).coerceIn(2.0f, 3.8f)
+            for (r in 0 until rows) {
+                val rowBase = r * cols
+                val cy = (r + 0.5f) * cellH
+                for (c in 0 until cols) {
+                    val strength = overlayData.peakingStrength[rowBase + c].toInt() and 0xFF
+                    if (strength >= 36) {
+                        val alpha = ((strength - 36) / 64f).coerceIn(0.45f, 0.95f)
+                        val peakColor = Color(0xFF00E676).copy(alpha = alpha)
+                        val cx = (c + 0.5f) * cellW
+                        val half = cellW * 0.36f
+                        drawRect(
+                            color = peakColor,
+                            topLeft = Offset(cx - half, cy - half * 0.35f),
+                            size = Size(half * 2f, strokeW)
+                        )
+                    }
+                }
             }
-
-            drawPath(path, peakingColor, style = stroke)
         }
     }
 }

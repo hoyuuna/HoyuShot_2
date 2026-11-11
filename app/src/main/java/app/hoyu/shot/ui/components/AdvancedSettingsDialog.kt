@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -38,6 +39,7 @@ fun AdvancedSettingsDialog(
     visible: Boolean,
     scrollToUpdates: Boolean = false,
     uiState: CameraUiState,
+    previewBoundsInRoot: Rect = Rect.Zero,
     onJpegQualityChanged: (Int) -> Unit,
     onToggleMirrorSelfie: () -> Unit,
     onAntibandingChanged: (String) -> Unit,
@@ -56,6 +58,7 @@ fun AdvancedSettingsDialog(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -94,7 +97,7 @@ fun AdvancedSettingsDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xCC000000))
+                .background(if (uiState.isUiBlurEnabled) Color(0x66000000) else Color(0xCC000000))
                 .clickable(
                     indication = null,
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -103,19 +106,25 @@ fun AdvancedSettingsDialog(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Column(
+            PopupGlassContainer(
+                shape = shape,
+                isBlurEnabled = uiState.isUiBlurEnabled,
+                blurredBackdrop = uiState.blurredBackdrop,
+                previewBoundsInRoot = previewBoundsInRoot,
+                rotationDegrees = 0f,
                 modifier = Modifier
                     .fillMaxWidth(0.92f)
                     .fillMaxHeight(0.88f)
-                    .clip(shape)
-                    .background(Color(0xF809090B))
-                    .border(1.dp, Color(0xFF27272A), shape)
                     .clickable(
                         indication = null,
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                     ) {
                         // Prevent dismiss when clicking inside dialog
                     }
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
                     .padding(18.dp)
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -141,7 +150,7 @@ fun AdvancedSettingsDialog(
                             .background(Color(0xFF18181B))
                             .border(1.dp, Color(0xFF27272A), shape)
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiHapticsEnabled)
                                 onDismiss()
                             }
                             .padding(horizontal = 8.dp, vertical = 5.dp)
@@ -195,7 +204,7 @@ fun AdvancedSettingsDialog(
                                 label = if (q == 95) "95% (REC)" else "$q%",
                                 isSelected = isSelected,
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onJpegQualityChanged(q)
                                 }
                             )
@@ -239,7 +248,7 @@ fun AdvancedSettingsDialog(
                                 isSelected = isSelected,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onAntibandingChanged(mode)
                                 }
                             )
@@ -274,7 +283,7 @@ fun AdvancedSettingsDialog(
                                 isSelected = isSelected,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onTapActionChanged(action)
                                 }
                             )
@@ -302,7 +311,7 @@ fun AdvancedSettingsDialog(
                                 isSelected = isSelected,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onHoldActionChanged(action)
                                 }
                             )
@@ -331,7 +340,7 @@ fun AdvancedSettingsDialog(
                                 label = label,
                                 isSelected = isSelected,
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onVolumeUpActionChanged(action)
                                 }
                             )
@@ -360,7 +369,7 @@ fun AdvancedSettingsDialog(
                                 label = label,
                                 isSelected = isSelected,
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onVolumeDownActionChanged(action)
                                 }
                             )
@@ -395,7 +404,7 @@ fun AdvancedSettingsDialog(
                                 isSelected = isSelected,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onCameraSoundChanged(mode)
                                 }
                             )
@@ -423,7 +432,7 @@ fun AdvancedSettingsDialog(
                                 isSelected = isSelected,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    view.triggerUiHaptic(uiHapticsEnabled)
                                     onUiHapticsChanged(mode)
                                 }
                             )
@@ -479,7 +488,7 @@ fun AdvancedSettingsDialog(
 
                         Button(
                             onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiHapticsEnabled)
                                 isCheckingUpdate = true
                                 updateResult = null
                                 downloadProgress = null
@@ -613,7 +622,7 @@ fun AdvancedSettingsDialog(
                                 } else if (downloadedApkFile != null) {
                                     Button(
                                         onClick = {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            view.triggerUiHaptic(uiHapticsEnabled)
                                             updateManager.installApk(downloadedApkFile!!)
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
@@ -627,7 +636,7 @@ fun AdvancedSettingsDialog(
                                 } else {
                                     Button(
                                         onClick = {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            view.triggerUiHaptic(uiHapticsEnabled)
                                             scope.launch {
                                                 downloadProgress = 0
                                                 downloadProgressText = "Connecting..."
@@ -695,6 +704,7 @@ fun AdvancedSettingsDialog(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
             }
+            }
         }
     }
 }
@@ -746,6 +756,7 @@ private fun SettingsToggleRow(
     onToggle: () -> Unit
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     Row(
         modifier = Modifier
@@ -754,7 +765,7 @@ private fun SettingsToggleRow(
             .background(if (isActive) Color(0x22E11D48) else Color(0xFF18181B))
             .border(1.dp, if (isActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
             .clickable {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onToggle()
             }
             .padding(12.dp),

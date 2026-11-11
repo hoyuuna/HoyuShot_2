@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -44,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
@@ -63,6 +66,7 @@ import java.util.*
 @Composable
 fun GalleryViewer(
     photos: List<CapturedPhotoInfo>,
+    isVisible: Boolean = true,
     rotationDegrees: Float = 0f,
     onDismiss: () -> Unit,
     onDeletePhoto: (CapturedPhotoInfo) -> Unit,
@@ -86,23 +90,32 @@ fun GalleryViewer(
         pageCount = { orderedPhotos.size + 1 }
     )
 
+    var isUiChromeVisible by remember { mutableStateOf(true) }
+
     // Detect swipe past newest photo into phantom page and smoothly exit
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage == orderedPhotos.size) {
+    LaunchedEffect(pagerState.currentPage, isVisible) {
+        if (isVisible && pagerState.currentPage >= orderedPhotos.size) {
             onDismiss()
         }
     }
 
-    // Ensure we start on the newest photo when opening
-    LaunchedEffect(photos) {
-        if (orderedPhotos.isNotEmpty()) {
+    // Reset to newest photo whenever gallery is opened (prevents getting stuck on the phantom exit page!)
+    LaunchedEffect(isVisible) {
+        if (isVisible && orderedPhotos.isNotEmpty()) {
+            isUiChromeVisible = true
+            pagerState.scrollToPage(orderedPhotos.size - 1)
+        }
+    }
+
+    // Keep currentPage in valid bounds if photos list shrinks (e.g. deletion) while visible
+    LaunchedEffect(orderedPhotos.size) {
+        if (isVisible && orderedPhotos.isNotEmpty() && pagerState.currentPage >= orderedPhotos.size) {
             pagerState.scrollToPage(orderedPhotos.size - 1)
         }
     }
 
     val currentPhotoIndex = pagerState.currentPage.coerceAtMost(orderedPhotos.size - 1)
     val currentPhoto = orderedPhotos.getOrNull(currentPhotoIndex) ?: orderedPhotos.last()
-    var isUiChromeVisible by remember { mutableStateOf(true) }
     val shape = RoundedCornerShape(2.dp)
 
     // Dynamic rotation: In landscape (90 or 270), swap dimensions so the entire viewer layout
@@ -111,8 +124,17 @@ fun GalleryViewer(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF000000))
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
     ) {
-        val isLandscape = rotationDegrees == 90f || rotationDegrees == 270f
+        val normRot = ((rotationDegrees % 360f) + 360f) % 360f
+        val isLandscape = (normRot in 45f..135f) || (normRot in 225f..315f)
         val viewportWidth = if (isLandscape) maxHeight else maxWidth
         val viewportHeight = if (isLandscape) maxWidth else maxHeight
 
@@ -125,6 +147,7 @@ fun GalleryViewer(
             // Horizontal Pager for smooth swipe left/right photo browsing
             HorizontalPager(
                 state = pagerState,
+                key = { page -> if (page < orderedPhotos.size) orderedPhotos[page].uriString else "phantom_exit" },
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 if (page < orderedPhotos.size) {
@@ -313,8 +336,11 @@ private fun ZoomablePhotoItem(
 ) {
     val context = LocalContext.current
     var bitmap by remember(photo.uriString) { mutableStateOf<Bitmap?>(null) }
+    var loadFailed by remember(photo.uriString) { mutableStateOf(false) }
 
     LaunchedEffect(photo.uriString) {
+        bitmap = null
+        loadFailed = false
         withContext(Dispatchers.IO) {
             try {
                 val uri = Uri.parse(photo.uriString)
@@ -351,22 +377,35 @@ private fun ZoomablePhotoItem(
                     } else {
                         raw
                     }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    // Decode DNG / RAW directly via ImageDecoder (handles EXIF orientation automatically)
+                    val source = ImageDecoder.createSource(context.contentResolver, uri)
+                    bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                        val maxDim = maxOf(info.size.width, info.size.height)
+                        if (maxDim > 2560) {
+                            decoder.setTargetSampleSize((maxDim / 2560).coerceAtLeast(2))
+                        }
+                    }
+                }
+                if (bitmap == null) {
+                    loadFailed = true
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                loadFailed = true
             }
         }
     }
 
-    val scaleAnim = remember { Animatable(1f) }
-    val offsetXAnim = remember { Animatable(0f) }
-    val offsetYAnim = remember { Animatable(0f) }
+    val scaleAnim = remember(photo.uriString) { Animatable(1f) }
+    val offsetXAnim = remember(photo.uriString) { Animatable(0f) }
+    val offsetYAnim = remember(photo.uriString) { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .pointerInput(photo.uriString) {
                 // Double tap to zoom in / reset to 1x with smooth spring animation
                 detectTapGestures(
                     onDoubleTap = {
@@ -385,7 +424,7 @@ private fun ZoomablePhotoItem(
                     onTap = { onToggleChrome() }
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(photo.uriString) {
                 // 1:1 Instant finger-tracking pinch-to-zoom (zero spring delay)
                 // When at 1x with 1 finger, touch events are NOT consumed so HorizontalPager swipes seamlessly!
                 awaitEachGesture {
@@ -452,6 +491,14 @@ private fun ZoomablePhotoItem(
                         translationY = offsetYAnim.value
                     ),
                 contentScale = ContentScale.Fit
+            )
+        } else if (loadFailed) {
+            Text(
+                text = "UNABLE TO LOAD IMAGE",
+                color = Color(0xFF71717A),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
             )
         } else {
             CircularProgressIndicator(

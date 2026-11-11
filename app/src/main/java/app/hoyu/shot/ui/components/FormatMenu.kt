@@ -20,7 +20,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -37,6 +39,10 @@ fun FormatMenu(
     resolutions: List<CameraResolution>,
     selectedResolution: CameraResolution?,
     currentFormat: CaptureFormat,
+    supportsRaw: Boolean = true,
+    isBlurEnabled: Boolean = true,
+    blurredBackdrop: ImageBitmap? = null,
+    previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
     onResolutionSelected: (CameraResolution) -> Unit,
     onFormatSelected: (CaptureFormat) -> Unit,
@@ -44,6 +50,7 @@ fun FormatMenu(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
@@ -91,12 +98,17 @@ fun FormatMenu(
                     },
                 contentAlignment = Alignment.Center
             ) {
+            PopupGlassContainer(
+                shape = shape,
+                isBlurEnabled = isBlurEnabled,
+                blurredBackdrop = blurredBackdrop,
+                previewBoundsInRoot = previewBoundsInRoot,
+                rotationDegrees = rotationDegrees,
+                modifier = Modifier.width(300.dp)
+            ) {
             Column(
                 modifier = Modifier
-                    .width(300.dp)
-                    .clip(shape)
-                    .background(Color(0xF509090B)) // shadcn zinc-950
-                    .border(1.dp, Color(0xFF27272A), shape)
+                    .fillMaxWidth()
                     .padding(14.dp)
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -155,7 +167,7 @@ fun FormatMenu(
                                         shape
                                     )
                                     .clickable {
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        view.triggerUiHaptic(uiHapticsEnabled)
                                         touchReleaseEpoch = System.currentTimeMillis()
                                         onResolutionSelected(res)
                                     }
@@ -176,13 +188,27 @@ fun FormatMenu(
 
                 // Section 2: Output Formats (Horizontal row: JPEG, RAW, RAW+JPEG)
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "OUTPUT FORMAT",
-                        color = Color(0xFF71717A),
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "OUTPUT FORMAT",
+                            color = Color(0xFF71717A),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        if (!supportsRaw) {
+                            Text(
+                                text = "RAW N/A ON LENS",
+                                color = Color(0xFF71717A),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -191,19 +217,26 @@ fun FormatMenu(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         formatOptions.forEach { fmt ->
-                            val isSelected = currentFormat == fmt
+                            val isEnabled = fmt == CaptureFormat.JPEG || supportsRaw
+                            val isSelected = currentFormat == fmt && isEnabled
                             Box(
                                 modifier = Modifier
                                     .height(34.dp)
                                     .clip(shape)
-                                    .background(if (isSelected) Color(0xFFE11D48) else Color(0xFF18181B))
+                                    .background(
+                                        when {
+                                            isSelected -> Color(0xFFE11D48)
+                                            !isEnabled -> Color(0xFF09090B)
+                                            else -> Color(0xFF18181B)
+                                        }
+                                    )
                                     .border(
                                         1.dp,
                                         if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
                                         shape
                                     )
-                                    .clickable {
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    .clickable(enabled = isEnabled) {
+                                        view.triggerUiHaptic(uiHapticsEnabled)
                                         touchReleaseEpoch = System.currentTimeMillis()
                                         onFormatSelected(fmt)
                                     }
@@ -212,7 +245,11 @@ fun FormatMenu(
                             ) {
                                 Text(
                                     text = fmt.label,
-                                    color = if (isSelected) Color.White else Color(0xFFFAFAFA),
+                                    color = when {
+                                        isSelected -> Color.White
+                                        !isEnabled -> Color(0xFF52525B)
+                                        else -> Color(0xFFFAFAFA)
+                                    },
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
@@ -221,6 +258,7 @@ fun FormatMenu(
                         }
                     }
                 }
+            }
             }
         }
         }

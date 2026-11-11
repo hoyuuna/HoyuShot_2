@@ -6,6 +6,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.view.Surface
 import androidx.compose.ui.geometry.Offset
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hoyu.shot.camera.Camera2Controller
@@ -108,6 +109,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        cameraController.onOverlayDataReady = { overlay ->
+            _uiState.update { it.copy(overlayAnalysis = overlay) }
+        }
+
+        cameraController.onBlurredBackdropReady = { bmp ->
+            _uiState.update { it.copy(blurredBackdrop = bmp) }
+        }
+
         // Collect horizon tilt angle in real time
         viewModelScope.launch {
             horizonSensor.orientationFlow.collect { orientation ->
@@ -172,7 +181,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             caps?.evCompensationRange?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
         } else 0
         val initKelvin = if (isResume) settingsRepo.savedKelvin else 5500
-        val initRaw = if (isResume) settingsRepo.savedRawEnabled else false
+        val lensSupportsRaw = caps?.supportsRawCapture == true && caps.supportedRawSizes.isNotEmpty()
+        val parsedFormat = try {
+            CaptureFormat.valueOf(settingsRepo.savedCaptureFormat)
+        } catch (e: Exception) {
+            if (settingsRepo.savedRawEnabled) CaptureFormat.RAW_JPEG else CaptureFormat.JPEG
+        }
+        val initFormat = if (isResume && lensSupportsRaw) parsedFormat else CaptureFormat.JPEG
+        val initRaw = initFormat == CaptureFormat.RAW || initFormat == CaptureFormat.RAW_JPEG
 
         val initMinShutter = settingsRepo.savedMinShutterLimitNanos?.let { saved ->
             caps?.shutterSpeedRangeNanos?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
@@ -200,7 +216,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             settingsRepo.isGeotaggingEnabled = false
         }
         cameraController.isGeotaggingEnabled = initGeo
-        cameraController.isRawCaptureEnabled = initRaw
+        cameraController.captureFormat = initFormat
+        cameraController.isPeakingOverlayEnabled = initPeaking
+        cameraController.isZebraOverlayEnabled = initZebra
         cameraController.jpegQuality = settingsRepo.jpegQuality
         cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
         cameraController.antibandingMode = settingsRepo.antibandingMode
@@ -226,6 +244,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isManualFocusEnabled = initIsManualFocus,
                 evCompensationIndex = initEv,
                 kelvinTemperature = initKelvin,
+                captureFormat = initFormat,
                 captureRaw = initRaw,
                 availableResolutions = initResolutions,
                 selectedResolution = defaultRes,
@@ -485,13 +504,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleFocusPeaking() {
         val next = !_uiState.value.isFocusPeakingEnabled
         _uiState.update { it.copy(isFocusPeakingEnabled = next) }
+        cameraController.isPeakingOverlayEnabled = next
         settingsRepo.savedPeakingEnabled = next
     }
 
     fun toggleZebraStripes() {
         val next = !_uiState.value.isZebraStripesEnabled
         _uiState.update { it.copy(isZebraStripesEnabled = next) }
+        cameraController.isZebraOverlayEnabled = next
         settingsRepo.savedZebraEnabled = next
+    }
+
+    fun setPopupBackdropBlurActive(active: Boolean) {
+        cameraController.isBlurBackdropNeeded = active
+        if (!active && _uiState.value.blurredBackdrop != null) {
+            _uiState.update { it.copy(blurredBackdrop = null) }
+        }
     }
 
     fun hasLocationPermission(): Boolean = cameraController.hasLocationPermission()
@@ -560,31 +588,74 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
                     var count = 0
+                    val resolver = getApplication<Application>().contentResolver
                     while (c.moveToNext() && count < 25) {
                         val id = c.getLong(idCol)
                         val name = c.getString(nameCol) ?: "IMG.jpg"
                         val w = c.getInt(widthCol)
                         val h = c.getInt(heightCol)
                         val sz = c.getLong(sizeCol)
+                        if (sz <= 0L) continue
                         val date = c.getLong(dateCol) * 1000L
                         val contentUri = android.content.ContentUris.withAppendedId(
                             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                             id
                         )
 
+                        var iso = 0
+                        var shutterStr = ""
+                        var apertureStr = ""
+                        var focalStr = ""
+                        var outW = w
+                        var outH = h
+                        try {
+                            resolver.openInputStream(contentUri)?.use { stream ->
+                                val exif = ExifInterface(stream)
+                                val isoAttr = exif.getAttributeInt(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, 0)
+                                    .takeIf { it > 0 }
+                                    ?: exif.getAttributeInt(ExifInterface.TAG_ISO_SPEED_RATINGS, 0)
+                                if (isoAttr > 0) iso = isoAttr
+
+                                val expSec = exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
+                                if (expSec > 0.0) {
+                                    shutterStr = HardwareCapabilities.formatShutterSpeed((expSec * 1_000_000_000.0).toLong())
+                                }
+
+                                val fNum = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
+                                if (fNum > 0.0) {
+                                    apertureStr = String.format(java.util.Locale.US, "f/%.1f", fNum)
+                                }
+
+                                val focalMm = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
+                                if (focalMm > 0.0) {
+                                    focalStr = String.format(java.util.Locale.US, "%.1fmm", focalMm)
+                                }
+
+                                val orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                                if ((orient == ExifInterface.ORIENTATION_ROTATE_90 || orient == ExifInterface.ORIENTATION_ROTATE_270) &&
+                                    outW > outH
+                                ) {
+                                    val tmp = outW
+                                    outW = outH
+                                    outH = tmp
+                                }
+                            }
+                        } catch (_: Exception) {
+                        }
+
                         list.add(
                             CapturedPhotoInfo(
                                 uriString = contentUri.toString(),
                                 isRaw = name.endsWith(".dng", ignoreCase = true),
-                                width = if (w > 0) w else 4000,
-                                height = if (h > 0) h else 3000,
-                                iso = 100,
-                                shutterSpeed = "1/120s",
-                                focalLength = "1x",
+                                width = if (outW > 0) outW else 4000,
+                                height = if (outH > 0) outH else 3000,
+                                iso = if (iso > 0) iso else 100,
+                                shutterSpeed = shutterStr.ifEmpty { "AUTO" },
+                                focalLength = focalStr.ifEmpty { "--" },
                                 timestamp = date,
                                 fileName = name,
                                 fileSizeBytes = sz,
-                                aperture = "f/1.8"
+                                aperture = apertureStr.ifEmpty { "f/1.8" }
                             )
                         )
                         count++
@@ -623,15 +694,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setCaptureFormat(format: CaptureFormat) {
-        val willCaptureRaw = format == CaptureFormat.RAW || format == CaptureFormat.RAW_JPEG
+        val caps = _uiState.value.capabilities
+        val supportsRaw = caps?.supportsRawCapture == true && caps.supportedRawSizes.isNotEmpty()
+        val effectiveFormat = if (!supportsRaw && format != CaptureFormat.JPEG) {
+            _uiState.update { it.copy(errorMessage = "Current lens does not support RAW (DNG) capture") }
+            CaptureFormat.JPEG
+        } else {
+            format
+        }
+        val willCaptureRaw = effectiveFormat == CaptureFormat.RAW || effectiveFormat == CaptureFormat.RAW_JPEG
         _uiState.update {
             it.copy(
-                captureFormat = format,
+                captureFormat = effectiveFormat,
                 captureRaw = willCaptureRaw
             )
         }
-        cameraController.isRawCaptureEnabled = willCaptureRaw
+        cameraController.captureFormat = effectiveFormat
         if (_uiState.value.isResumeSettingsEnabled) {
+            settingsRepo.savedCaptureFormat = effectiveFormat.name
             settingsRepo.savedRawEnabled = willCaptureRaw
         }
     }
@@ -699,6 +779,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             } else 0f
             val clampedIsManualFocus = if (caps != null && !caps.supportsManualFocus) false else _uiState.value.isManualFocusEnabled
             val clampedEv = caps?.evCompensationRange?.let { range -> _uiState.value.evCompensationIndex.coerceIn(range.lower, range.upper) } ?: _uiState.value.evCompensationIndex
+            val supportsRaw = caps?.supportsRawCapture == true && caps.supportedRawSizes.isNotEmpty()
+            val nextFormat = if (!supportsRaw && _uiState.value.captureFormat != CaptureFormat.JPEG) CaptureFormat.JPEG else _uiState.value.captureFormat
+            val nextRaw = nextFormat == CaptureFormat.RAW || nextFormat == CaptureFormat.RAW_JPEG
 
             _uiState.update {
                 it.copy(
@@ -711,9 +794,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     shutterSpeedNanos = clampedShutter,
                     focusDistanceDiopters = clampedFocus,
                     isManualFocusEnabled = clampedIsManualFocus,
-                    evCompensationIndex = clampedEv
+                    evCompensationIndex = clampedEv,
+                    captureFormat = nextFormat,
+                    captureRaw = nextRaw
                 )
             }
+            cameraController.captureFormat = nextFormat
             if (_uiState.value.isResumeSettingsEnabled) {
                 settingsRepo.savedCameraId = lens.cameraId
                 settingsRepo.savedIso = clampedIso
@@ -1076,10 +1162,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleRaw() {
-        val next = !_uiState.value.captureRaw
-        _uiState.update { it.copy(captureRaw = next) }
-        cameraController.isRawCaptureEnabled = next
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedRawEnabled = next
+        val nextFormat = if (_uiState.value.captureRaw) CaptureFormat.JPEG else CaptureFormat.RAW_JPEG
+        setCaptureFormat(nextFormat)
     }
 
     fun takePicture() {
@@ -1099,17 +1183,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     delay(1000)
                 }
                 _uiState.update { it.copy(timerCountdownSeconds = null, isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
-                cameraController.takePicture(captureRaw = _uiState.value.captureRaw)
+                cameraController.takePicture(
+                    captureRaw = _uiState.value.captureRaw,
+                    format = _uiState.value.captureFormat
+                )
             }
         } else {
             _uiState.update { it.copy(isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
-            cameraController.takePicture(captureRaw = _uiState.value.captureRaw)
+            cameraController.takePicture(
+                captureRaw = _uiState.value.captureRaw,
+                format = _uiState.value.captureFormat
+            )
         }
     }
 
     fun takeBurstShot() {
         _uiState.update { it.copy(isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
-        cameraController.takeBurstPicture(captureRaw = _uiState.value.captureRaw)
+        cameraController.takeBurstPicture(
+            captureRaw = _uiState.value.captureRaw,
+            format = _uiState.value.captureFormat
+        )
     }
 
     private fun persistCurrentSettings() {
@@ -1122,6 +1215,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsRepo.savedIsManualFocus = s.isManualFocusEnabled
         settingsRepo.savedEvIndex = s.evCompensationIndex
         settingsRepo.savedKelvin = s.kelvinTemperature
+        settingsRepo.savedCaptureFormat = s.captureFormat.name
         settingsRepo.savedRawEnabled = s.captureRaw
         settingsRepo.savedNoiseReduction = s.noiseReductionMode.name
         settingsRepo.savedSharpness = s.sharpnessMode.name

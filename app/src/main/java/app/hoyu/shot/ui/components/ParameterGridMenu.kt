@@ -22,7 +22,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -41,6 +43,9 @@ fun <T> ParameterGridMenu(
     limitItem: T? = null,
     onItemLongClick: ((T) -> Unit)? = null,
     footerNote: String? = null,
+    isBlurEnabled: Boolean = true,
+    blurredBackdrop: ImageBitmap? = null,
+    previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
     onItemSelected: (T) -> Unit,
     formatItem: (T) -> String,
@@ -50,6 +55,7 @@ fun <T> ParameterGridMenu(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
@@ -83,13 +89,19 @@ fun <T> ParameterGridMenu(
             },
         contentAlignment = Alignment.Center
     ) {
+        PopupGlassContainer(
+            shape = shape,
+            isBlurEnabled = isBlurEnabled,
+            blurredBackdrop = blurredBackdrop,
+            previewBoundsInRoot = previewBoundsInRoot,
+            rotationDegrees = rotationDegrees,
+            modifier = Modifier
+                .width(320.dp)
+                .heightIn(max = 340.dp)
+        ) {
             Column(
                 modifier = Modifier
-                    .width(320.dp)
-                    .heightIn(max = 340.dp)
-                    .clip(shape)
-                    .background(Color(0xF509090B)) // shadcn zinc-950
-                    .border(1.dp, Color(0xFF27272A), shape)
+                    .fillMaxWidth()
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -143,7 +155,7 @@ fun <T> ParameterGridMenu(
                             .background(autoBgColor)
                             .border(1.dp, autoBorderColor, shape)
                             .clickable {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiHapticsEnabled)
                                 touchReleaseEpoch = System.currentTimeMillis()
                                 onAutoSelected()
                             }
@@ -228,13 +240,13 @@ fun <T> ParameterGridMenu(
                                         .border(itemBorderWidth, itemBorderColor, shape)
                                         .combinedClickable(
                                             onClick = {
-                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                view.triggerUiHaptic(uiHapticsEnabled)
                                                 touchReleaseEpoch = System.currentTimeMillis()
                                                 onItemSelected(item)
                                             },
                                             onLongClick = if (onItemLongClick != null) {
                                                 {
-                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                    view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.LONG_PRESS)
                                                     touchReleaseEpoch = System.currentTimeMillis()
                                                     onItemLongClick(item)
                                                 }
@@ -302,3 +314,4 @@ fun <T> ParameterGridMenu(
             }
         }
     }
+}

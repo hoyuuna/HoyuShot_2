@@ -37,6 +37,7 @@ fun DedicatedBottomEvBar(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val totalSteps = (maxEv - minEv).coerceAtLeast(1)
 
@@ -64,7 +65,7 @@ fun DedicatedBottomEvBar(
             modifier = Modifier
                 .clickable {
                     if (evIndex > minEv) {
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                         onEvChanged(evIndex - 1)
                     }
                 }
@@ -82,7 +83,7 @@ fun DedicatedBottomEvBar(
                         val fraction = ((offset.x - 8f) / trackW).coerceIn(0f, 1f)
                         val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
                         if (step != evIndex) {
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                             onEvChanged(step)
                         }
                     }
@@ -95,7 +96,7 @@ fun DedicatedBottomEvBar(
                             activeTouchFraction = fraction
                             val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
                             if (step != evIndex) {
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                                 onEvChanged(step)
                             }
                         },
@@ -112,7 +113,7 @@ fun DedicatedBottomEvBar(
                             activeTouchFraction = fraction
                             val step = (minEv + (fraction * totalSteps).roundToInt()).coerceIn(minEv, maxEv)
                             if (step != evIndex) {
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                                 onEvChanged(step)
                             }
                         }
@@ -173,7 +174,7 @@ fun DedicatedBottomEvBar(
             modifier = Modifier
                 .clickable {
                     if (evIndex < maxEv) {
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                         onEvChanged(evIndex + 1)
                     }
                 }
@@ -188,7 +189,7 @@ fun DedicatedBottomEvBar(
                 .background(if (evIndex != 0) Color(0x33E11D48) else Color(0xFF27272A))
                 .border(1.dp, if (evIndex != 0) Color(0xFFE11D48) else Color(0xFF3F3F46), shape)
                 .clickable(enabled = evIndex != 0) {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    view.triggerUiHaptic(uiHapticsEnabled)
                     onResetEv()
                 }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -231,6 +232,7 @@ fun EvPositionAlertBadge(
     if (evIndex == 0) return
 
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val sign = if (evIndex > 0) "+$evIndex" else "$evIndex"
 
@@ -241,7 +243,7 @@ fun EvPositionAlertBadge(
             .background(Color(0xD909090B)) // Translucent Nothing Dark
             .border(1.dp, Color(0xFFE11D48), shape) // Nothing Red border
             .clickable {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                view.triggerUiHaptic(uiHapticsEnabled)
                 onResetEv() // Resets EV to 0 on tap as requested!
             }
             .padding(horizontal = 8.dp, vertical = 4.dp)

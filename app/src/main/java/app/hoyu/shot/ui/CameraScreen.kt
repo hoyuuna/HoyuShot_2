@@ -38,13 +38,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -82,6 +84,7 @@ fun CameraScreen(
 
     var surfaceViewRef by remember { mutableStateOf<AutoFitSurfaceView?>(null) }
     var previewContainerSize by remember { mutableStateOf(IntSize.Zero) }
+    var previewBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
 
     var isModeModalVisible by remember { mutableStateOf(false) }
     var isSettingsDialogVisible by remember { mutableStateOf(false) }
@@ -156,6 +159,7 @@ fun CameraScreen(
         else -> 3f / 4f
     }
 
+    CompositionLocalProvider(LocalUiHapticsEnabled provides (uiState.uiHapticsMode == "VIBRATE")) {
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -169,6 +173,10 @@ fun CameraScreen(
         val isOverlayNeeded = leftoverHeight < 210.dp
 
         val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
+
+        LaunchedEffect(isAnyPopupOpen, uiState.isUiBlurEnabled) {
+            viewModel.setPopupBackdropBlurActive(isAnyPopupOpen && uiState.isUiBlurEnabled)
+        }
 
         // Subtle single haptic when horizon level aligns (with hysteresis to avoid micro-jitter repeats)
         var hasSignaledHorizonLevel by remember { mutableStateOf(false) }
@@ -232,7 +240,7 @@ fun CameraScreen(
                         },
                         onToggleGrid = { viewModel.toggleGrid() },
                         onToggleFormatMenu = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                             isFormatMenuVisible = !isFormatMenuVisible
                         }
                     )
@@ -242,6 +250,7 @@ fun CameraScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(previewRatio)
+                            .onGloballyPositioned { previewBoundsInRoot = it.boundsInRoot() }
                     ) {
                         ViewfinderPreviewContent(
                             uiState = uiState,
@@ -308,6 +317,7 @@ fun CameraScreen(
                             .fillMaxWidth()
                             .aspectRatio(previewRatio)
                             .align(Alignment.Center)
+                            .onGloballyPositioned { previewBoundsInRoot = it.boundsInRoot() }
                     ) {
                         ViewfinderPreviewContent(
                             uiState = uiState,
@@ -360,7 +370,7 @@ fun CameraScreen(
                             },
                             onToggleGrid = { viewModel.toggleGrid() },
                             onToggleFormatMenu = {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                                 isFormatMenuVisible = !isFormatMenuVisible
                             }
                         )
@@ -426,6 +436,11 @@ fun CameraScreen(
             resolutions = uiState.availableResolutions,
             selectedResolution = uiState.selectedResolution,
             currentFormat = uiState.captureFormat,
+            supportsRaw = uiState.capabilities?.supportsRawCapture == true &&
+                uiState.capabilities?.supportedRawSizes?.isNotEmpty() == true,
+            isBlurEnabled = uiState.isUiBlurEnabled,
+            blurredBackdrop = uiState.blurredBackdrop,
+            previewBoundsInRoot = previewBoundsInRoot,
             rotationDegrees = animatedRotation,
             onResolutionSelected = { res -> viewModel.setResolution(res) },
             onFormatSelected = { fmt -> viewModel.setCaptureFormat(fmt) },
@@ -465,6 +480,9 @@ fun CameraScreen(
                             limitItem = uiState.minShutterLimitNanos,
                             onItemLongClick = { nanos -> viewModel.toggleShutterLimit(nanos) },
                             footerNote = "TIP // Long-press a shutter speed to set as Minimum Shutter Limit (L) for Auto mode. Note: May behave unpredictably on some aux lenses and react slower during sudden brightness shifts.",
+                            isBlurEnabled = uiState.isUiBlurEnabled,
+                            blurredBackdrop = uiState.blurredBackdrop,
+                            previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { nanos ->
                                 viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
@@ -489,6 +507,9 @@ fun CameraScreen(
                             limitItem = uiState.maxIsoLimit,
                             onItemLongClick = { iso -> viewModel.toggleIsoLimit(iso) },
                             footerNote = "TIP // Long-press an ISO to set as Maximum ISO Ceiling (L) for Auto mode. Note: May behave unpredictably on some aux lenses and react slower during sudden brightness shifts.",
+                            isBlurEnabled = uiState.isUiBlurEnabled,
+                            blurredBackdrop = uiState.blurredBackdrop,
+                            previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { iso ->
                                 viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
@@ -513,6 +534,9 @@ fun CameraScreen(
                             title = "LENS // FOCUS",
                             items = focusDiopters,
                             selectedItem = if (uiState.isManualFocusEnabled) uiState.focusDistanceDiopters.coerceIn(0f, maxDiopters) else null,
+                            isBlurEnabled = uiState.isUiBlurEnabled,
+                            blurredBackdrop = uiState.blurredBackdrop,
+                            previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { diopter -> viewModel.setFocusDistance(diopter) },
                             formatItem = { if (it == 0f) "∞ MACRO" else String.format(java.util.Locale.US, "%.1fD", it) },
@@ -528,6 +552,9 @@ fun CameraScreen(
                             title = "WB // KELVIN",
                             items = kelvinValues,
                             selectedItem = if (uiState.whiteBalancePreset == WhiteBalancePreset.CUSTOM_KELVIN) uiState.kelvinTemperature else null,
+                            isBlurEnabled = uiState.isUiBlurEnabled,
+                            blurredBackdrop = uiState.blurredBackdrop,
+                            previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { k -> viewModel.setKelvin(k) },
                             formatItem = { "${it}K" },
@@ -545,6 +572,9 @@ fun CameraScreen(
         ModeDialSelectorModal(
             visible = isModeModalVisible,
             currentMode = uiState.exposureMode,
+            isBlurEnabled = uiState.isUiBlurEnabled,
+            blurredBackdrop = uiState.blurredBackdrop,
+            previewBoundsInRoot = previewBoundsInRoot,
             rotationDegrees = animatedRotation,
             onModeSelected = { viewModel.setExposureMode(it) },
             onDismiss = { isModeModalVisible = false },
@@ -555,6 +585,7 @@ fun CameraScreen(
         SettingsDialog(
             visible = isSettingsDialogVisible,
             uiState = uiState,
+            previewBoundsInRoot = previewBoundsInRoot,
             rotationDegrees = animatedRotation,
             onToggleResumeSettings = { viewModel.toggleResumeSettings() },
             onToggleGeotagging = {
@@ -602,6 +633,7 @@ fun CameraScreen(
             visible = isAdvancedSettingsVisible,
             scrollToUpdates = scrollToUpdates,
             uiState = uiState,
+            previewBoundsInRoot = previewBoundsInRoot,
             onJpegQualityChanged = { viewModel.setJpegQuality(it) },
             onToggleMirrorSelfie = { viewModel.toggleMirrorSelfie() },
             onAntibandingChanged = { viewModel.setAntibandingMode(it) },
@@ -640,12 +672,14 @@ fun CameraScreen(
         ) {
             GalleryViewer(
                 photos = uiState.recentPhotos,
+                isVisible = uiState.isGalleryVisible,
                 rotationDegrees = animatedRotation,
                 onDismiss = { viewModel.closeGallery() },
                 onDeletePhoto = { photo -> viewModel.deletePhoto(photo) },
                 modifier = Modifier.fillMaxSize()
             )
         }
+    }
     }
 }
 
@@ -907,11 +941,11 @@ private fun ViewfinderPreviewContent(
         // Composition Grid Overlay
         GridOverlay(gridMode = uiState.gridMode)
 
-        // Focus Peaking & Zebra Stripes Overlay
+        // Focus Peaking & Zebra Stripes Overlay (Real spatial edge & highlight analysis)
         PeakingAndZebraOverlay(
             isPeakingEnabled = uiState.isFocusPeakingEnabled,
             isZebraEnabled = uiState.isZebraStripesEnabled,
-            histogram = uiState.histogram
+            overlayData = uiState.overlayAnalysis
         )
 
         // Large Dual-Axis Horizon Level (Rotates with user holding orientation)
@@ -1201,7 +1235,7 @@ private fun BottomControlsContent(
                     .background(Color(0x33000000))
                     .border(1.dp, Color(0xFFFAFAFA), shape)
                     .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                         onOpenModeModal()
                     },
                 contentAlignment = Alignment.Center
@@ -1340,7 +1374,7 @@ private fun BottomControlsContent(
                     .background(Color(0x33000000))
                     .border(1.dp, Color(0xFF27272A), shape)
                     .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                         onToggleFlip()
                     },
                 contentAlignment = Alignment.Center
@@ -1363,7 +1397,7 @@ private fun BottomControlsContent(
                     .background(if (uiState.flashMode != FlashMode.OFF) Color(0xFF27272A) else Color(0x33000000))
                     .border(1.dp, if (uiState.flashMode != FlashMode.OFF) Color(0xFFFAFAFA) else Color(0xFF27272A), shape)
                     .clickable {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                         onToggleFlash()
                     },
                 contentAlignment = Alignment.Center

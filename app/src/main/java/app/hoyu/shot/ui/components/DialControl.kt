@@ -1,4 +1,4 @@
-﻿package app.hoyu.shot.ui.components
+package app.hoyu.shot.ui.components
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
@@ -31,6 +31,7 @@ fun <T> DialWheelControl(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val itemSpacingPx = 70f
 
@@ -85,7 +86,7 @@ fun <T> DialWheelControl(
                                 if (newIndex != currentIndex) {
                                     currentIndex = newIndex
                                     dragOffset = 0f
-                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    view.triggerUiHaptic(uiHapticsEnabled, HapticFeedbackConstants.CLOCK_TICK)
                                     onItemSelected(currentIndex, items[currentIndex])
                                 }
                             }
