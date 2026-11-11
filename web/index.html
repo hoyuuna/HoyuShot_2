@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HoyuShot — Manual camera control for Android</title>
+<meta name="description" content="HoyuShot is a full manual camera app for Android with DSLR-style modes, RAW DNG capture, focus peaking, zebra warnings, histogram, and a background footprint of about 0.5 MB RAM.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@1,800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000000;
+    --popup: #09090B;
+    --card: #18181B;
+    --border: #27272A;
+    --border-strong: #3F3F46;
+
+    --accent: #E11D48;
+    --accent-hi: #FF4D6D;
+    --accent-tint: rgba(225, 29, 72, 0.13);
+
+    --text-hi: #FAFAFA;
+    --text: #E4E4E7;
+    --text-2: #A1A1AA;
+    --text-3: #71717A;
+
+    --font-logo: "Montserrat", system-ui, sans-serif;
+    --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --max: 1120px;
+    --gutter: clamp(20px, 4vw, 48px);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { display: block; max-width: 100%; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 3px; }
+  .wrap { width: min(100% - var(--gutter) * 2, var(--max)); margin-inline: auto; }
+
+  /* Logo */
+  .logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    color: var(--text-hi); text-decoration: none; letter-spacing: -0.01em;
+    text-transform: uppercase;
+  }
+  .logo img { width: 32px; height: 32px; border-radius: 22%; }
+  .logo-text { font-size: 1.35rem; line-height: 1; }
+
+  /* Header (auto-hidden at top of page) */
+  .site-header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    background: rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    transform: translateY(-100%);
+    transition: transform 220ms ease;
+  }
+  .site-header.is-visible { transform: translateY(0); }
+  .site-header .wrap {
+    display: flex; align-items: center; justify-content: space-between; height: 64px;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 14px 24px; border-radius: 2px;
+    font: 600 1rem/1 var(--font-body);
+    text-decoration: none; cursor: pointer;
+    border: 1px solid var(--accent);
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+  .btn-primary { background: var(--accent); color: var(--text-hi); }
+  .btn-primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+  .btn-ghost { background: var(--card); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: var(--border-strong); color: var(--text-hi); }
+  .btn-sm { padding: 10px 18px; font-size: 0.92rem; }
+
+  /* Hero */
+  .hero { padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 8vw, 96px); border-bottom: 1px solid var(--border); }
+  .hero h1 {
+    margin: 0; font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    text-transform: uppercase;
+    font-size: clamp(3.2rem, 9vw, 6.5rem); line-height: 0.95; letter-spacing: -0.02em;
+    color: var(--text-hi);
+  }
+  .lede { margin: 24px 0 0; max-width: 46ch; font-size: 1.2rem; color: var(--text-2); }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+  .meta { margin-top: 20px; font-size: 0.9rem; color: var(--text-3); }
+  .meta span { color: var(--text); }
+
+  /* App screenshot, 21:9 */
+  .shot {
+    position: relative;
+    margin: clamp(48px, 7vw, 80px) 0 0;
+    aspect-ratio: var(--ar, 2.17);
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    background: var(--popup);
+    container-type: inline-size;
+  }
+  /* Source image is portrait. It is rotated 90deg to the left so the landscape UI is upright.
+     --ar and --k are set from the image's natural size by the script below. */
+  .shot img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(100cqw * var(--k, 0.46));
+    height: 100cqw;
+    max-width: none;
+    transform: translate(-50%, -50%) rotate(-90deg);
+  }
+  .shot figcaption { margin-top: 12px; font-size: 0.85rem; color: var(--text-3); }
+
+  /* Sections */
+  .section { padding: clamp(64px, 9vw, 104px) 0; border-bottom: 1px solid var(--border); }
+  .section-head {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 24px 48px; align-items: end; margin-bottom: 48px;
+  }
+  .section-head h2 {
+    margin: 0; font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    font-size: clamp(2rem, 4.2vw, 3rem); line-height: 1.05; letter-spacing: -0.02em;
+    color: var(--text-hi);
+  }
+  .section-head p { margin: 0; color: var(--text-3); max-width: 56ch; }
+
+  /* Modes */
+  .modes {
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-top: 1px solid var(--border); border-left: 1px solid var(--border);
+  }
+  .mode {
+    padding: 28px 22px 32px; background: var(--popup);
+    border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .mode-letter {
+    font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    font-size: 2.4rem; line-height: 1; color: var(--text-hi);
+  }
+  .mode h3 { margin: 16px 0 8px; font-size: 1.05rem; font-weight: 600; color: var(--text); }
+  .mode p { margin: 0; font-size: 0.95rem; color: var(--text-3); }
+  @media (max-width: 860px) {
+    .modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mode:last-child { grid-column: span 2; }
+  }
+
+  /* Spec list */
+  .spec { margin: 0; border-top: 1px solid var(--border); }
+  .spec-row {
+    display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+    gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--border);
+  }
+  .spec-row dt { font-weight: 600; font-size: 1.05rem; color: var(--text-hi); }
+  .spec-row dd { margin: 0; color: var(--text-3); }
+
+  /* Feature grid */
+  .features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 64px; }
+  .feature { padding: 26px 0; border-top: 1px solid var(--border); }
+  .feature h3 { margin: 0 0 8px; font-size: 1.1rem; font-weight: 600; color: var(--text-hi); }
+  .feature p { margin: 0; color: var(--text-3); font-size: 0.97rem; }
+  @media (max-width: 760px) { .features { grid-template-columns: 1fr; } }
+
+  /* Footprint stat */
+  .footprint {
+    display: grid; grid-template-columns: auto minmax(0, 1fr);
+    gap: clamp(24px, 5vw, 64px); align-items: center;
+    padding: clamp(32px, 5vw, 56px);
+    background: var(--card); border: 1px solid var(--border);
+  }
+  .footprint-value {
+    font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    font-size: clamp(4.5rem, 12vw, 8rem); line-height: 0.9; color: var(--accent-hi);
+  }
+  .footprint-value small { font-size: 0.35em; color: var(--text-hi); margin-left: 6px; }
+  .footprint h3 { margin: 0 0 10px; font-size: 1.4rem; font-weight: 600; color: var(--text-hi); }
+  .footprint p { margin: 0; color: var(--text-3); max-width: 52ch; }
+  @media (max-width: 680px) { .footprint { grid-template-columns: 1fr; } }
+
+  /* Download */
+  .download-box {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: center;
+    padding: clamp(28px, 4vw, 44px);
+    background: var(--accent-tint); border: 1px solid var(--accent);
+  }
+  .download-box h2 {
+    margin: 0 0 8px; font-family: var(--font-logo); font-weight: 800; font-style: italic;
+    font-size: clamp(2rem, 4.2vw, 2.8rem); line-height: 1.05; letter-spacing: -0.02em; color: var(--text-hi);
+  }
+  .download-box > div > p { margin: 0; color: var(--text-2); }
+  .version { margin-top: 14px; font-size: 0.92rem; color: var(--text); }
+  .version span { color: var(--accent-hi); }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 10px; margin-top: 16px;
+    font-size: 0.95rem; color: var(--text-2); cursor: pointer;
+  }
+  .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .download-actions { display: flex; flex-direction: column; gap: 12px; min-width: 220px; }
+  .status { margin: 0; font-size: 0.85rem; color: var(--text-3); }
+  @media (max-width: 680px) {
+    .download-box { grid-template-columns: 1fr; }
+    .download-actions { min-width: 0; }
+  }
+
+  /* Footer */
+  .site-footer { padding: 40px 0 56px; font-size: 0.9rem; color: var(--text-3); }
+  .site-footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; }
+  .site-footer a { color: var(--text-3); text-decoration: none; }
+  .site-footer a:hover { color: var(--text-hi); }
+  .site-footer .logo { font-size: 1.05rem; color: var(--text-2); }
+  .site-footer .logo img { width: 24px; height: 24px; border-radius: 22%; }
+
+  @media (max-width: 860px) {
+    .section-head { grid-template-columns: 1fr; }
+    .spec-row { grid-template-columns: 1fr; gap: 6px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header" id="site-header">
+  <div class="wrap">
+    <a href="#top" class="logo" aria-label="HoyuShot home">
+      <img src="https://i.postimg.cc/SRRbfNTb/logo.png" alt="">
+      <span class="logo-text">HOYUSHOT</span>
+    </a>
+    <a class="btn btn-primary btn-sm" href="#download">Download APK</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <a href="#top" class="logo" style="margin-bottom: 20px;" aria-hidden="true">
+        <img src="https://i.postimg.cc/SRRbfNTb/logo.png" alt="" style="width:56px;height:56px;border-radius:22%;">
+      </a>
+      <h1>HOYUSHOT</h1>
+      <p class="lede">A manual camera app for Android that gives you the controls of a DSLR, in your pocket. Shutter, ISO, focus, and white balance are yours to set, and the app stays out of the way.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#download">Download APK</a>
+        <a class="btn btn-ghost" href="https://github.com/hoyuuna/HoyuShot_2" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+      <p class="meta">Free and open source. Version <span id="hero-version">loading</span></p>
+
+      <figure class="shot">
+        <img src="https://i.postimg.cc/8P3NwMgr/Screenshot-2026-11-11-22-18-18-445-app-hoyu-shot.jpg" alt="HoyuShot camera interface">
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="modes">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Five exposure modes</h2>
+        <p>Start with full automation and move toward complete manual control. Each mode hands you exactly the decisions you want to make.</p>
+      </div>
+      <div class="modes">
+        <article class="mode">
+          <div class="mode-letter">A</div>
+          <h3>Auto</h3>
+          <p>The camera hardware sets ISO, shutter speed, and white balance.</p>
+        </article>
+        <article class="mode">
+          <div class="mode-letter">P</div>
+          <h3>Program</h3>
+          <p>Auto exposure picks shutter and ISO. You add exposure compensation and manual focus.</p>
+        </article>
+        <article class="mode">
+          <div class="mode-letter">S</div>
+          <h3>Shutter priority</h3>
+          <p>You lock the shutter speed. A software metering loop reads the live frame and sets ISO to match.</p>
+        </article>
+        <article class="mode">
+          <div class="mode-letter">ISO</div>
+          <h3>ISO priority</h3>
+          <p>You lock the sensitivity. The metering loop calculates the shutter speed for you.</p>
+        </article>
+        <article class="mode">
+          <div class="mode-letter">M</div>
+          <h3>Manual</h3>
+          <p>Full control of ISO, shutter speed, focus distance, and white balance. Auto exposure is off.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="controls">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Exposure, focus, and color</h2>
+        <p>Every value is limited to the range your lens and sensor report, so you never pick a setting the hardware cannot deliver.</p>
+      </div>
+      <dl class="spec">
+        <div class="spec-row">
+          <dt>Shutter speed</dt>
+          <dd>Presets from 1/10000 s to 30 s, filtered to your lens's exposure time range.</dd>
+        </div>
+        <div class="spec-row">
+          <dt>ISO</dt>
+          <dd>Presets from 50 to 12800, filtered to your sensor's sensitivity range.</dd>
+        </div>
+        <div class="spec-row">
+          <dt>Focus</dt>
+          <dd>Continuous autofocus, or manual focus measured in diopters from infinity to the closest focus distance.</dd>
+        </div>
+        <div class="spec-row">
+          <dt>White balance</dt>
+          <dd>Auto, or a Kelvin scale from 2800K to 7500K in 300K steps. Presets for daylight, cloudy, shade, fluorescent, and incandescent are also available.</dd>
+        </div>
+        <div class="spec-row">
+          <dt>Exposure compensation</dt>
+          <dd>A 1:1 scale along the bottom of the screen with plus and minus buttons, using your camera's full compensation range. A reset badge appears when the value is not zero.</dd>
+        </div>
+        <div class="spec-row">
+          <dt>Exposure limits</dt>
+          <dd>Long-press a shutter or ISO value to set a floor or ceiling for Auto and Program. When the hardware exceeds the limit, HoyuShot clamps the exposure in software and releases it when light returns.</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section" id="viewfinder">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Tools on the viewfinder</h2>
+        <p>Professional aids for checking focus, exposure, and framing before you press the shutter.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <h3>Live histogram</h3>
+          <p>A 256-level chart for luminance and the red, green, and blue channels, updated from the live stream.</p>
+        </div>
+        <div class="feature">
+          <h3>Focus peaking</h3>
+          <p>Sharp edges are highlighted in green so you can see exactly what is in focus.</p>
+        </div>
+        <div class="feature">
+          <h3>Zebra warnings</h3>
+          <p>Diagonal stripes mark areas that are close to clipping to white, so you can protect highlights.</p>
+        </div>
+        <div class="feature">
+          <h3>Two-axis level</h3>
+          <p>Shows roll and pitch against the gravity sensor. The indicator turns red and vibrates when the camera is level in all four orientations.</p>
+        </div>
+        <div class="feature">
+          <h3>Sun compass</h3>
+          <p>Uses GPS, the rotation sensor, and magnetic declination to show where the sun is and the light quality: backlit, frontlit, golden hour, or zenith.</p>
+        </div>
+        <div class="feature">
+          <h3>Composition grid</h3>
+          <p>Switch between off, a 3×3 rule-of-thirds grid, and a golden-ratio grid.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="capture">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Capture and formats</h2>
+        <p>Fast shutter response for everyday shooting, RAW files for editing, and metadata that records how each shot was made.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <h3>Zero shutter lag</h3>
+          <p>At speeds under 350 ms the shutter releases immediately, so you can shoot in quick succession.</p>
+        </div>
+        <div class="feature">
+          <h3>Burst and long exposure</h3>
+          <p>Hold the shutter for continuous burst shooting with a live frame counter. Exposures of 350 ms or longer show a progress ring until they finish.</p>
+        </div>
+        <div class="feature">
+          <h3>Self timer</h3>
+          <p>Choose 1, 2, 5, or 10 seconds, with a large countdown and a vibration on each second.</p>
+        </div>
+        <div class="feature">
+          <h3>Flash modes</h3>
+          <p>Off, auto, on, or torch, working in manual, shutter priority, and ISO priority.</p>
+        </div>
+        <div class="feature">
+          <h3>JPEG, RAW, and RAW+JPEG</h3>
+          <p>Save DNG RAW files with the sensor's full data, or a combined RAW+JPEG pair. RAW is turned off automatically on lenses that do not support it.</p>
+        </div>
+        <div class="feature">
+          <h3>Resolution and aspect ratio</h3>
+          <p>Switch between 4:3, 16:9, and 1:1. The app lists up to four megapixel options that match the chosen ratio.</p>
+        </div>
+        <div class="feature">
+          <h3>Noise and sharpness</h3>
+          <p>Set noise reduction to off, minimum, or high quality, and sharpness to off, 0, or +1. The preview stays fast while photos get full processing.</p>
+        </div>
+        <div class="feature">
+          <h3>Full EXIF and GPS</h3>
+          <p>Writes ISO, shutter speed, aperture, focal length, lens make and model, and optional GPS tags to both JPEG and DNG files. Files save to DCIM/HoyuShot.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="lenses">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Every lens your phone has</h2>
+        <p>HoyuShot looks past the default camera list to find hidden physical lenses, then labels each one by its 35 mm equivalent focal length.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <h3>Deep sensor probe</h3>
+          <p>Finds manufacturer-hidden telephoto and ultrawide lenses that standard camera lists miss, and filters out depth and time-of-flight sensors.</p>
+        </div>
+        <div class="feature">
+          <h3>Pinch zoom on each lens</h3>
+          <p>Zoom from 1.0x to 10.0x on the current sensor without jumping to another lens. Tap the active lens button while zoomed in to return to 1x.</p>
+        </div>
+        <div class="feature">
+          <h3>Zoom fallback</h3>
+          <p>If a hidden lens is blocked or fails to open, HoyuShot switches to the main camera and simulates the focal length with hardware crop.</p>
+        </div>
+        <div class="feature">
+          <h3>Settings carry over</h3>
+          <p>When you change lens, ISO, shutter, focal length, and exposure values are adjusted to the new lens's limits automatically.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="footprint">
+    <div class="wrap">
+      <div class="footprint">
+        <div class="footprint-value">0.5<small>MB</small></div>
+        <div>
+          <h3>Light enough to leave running</h3>
+          <p>HoyuShot uses about 0.5 MB of RAM while running in the background, so it does not slow down your phone or drain the battery when you switch apps.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="download">
+    <div class="wrap">
+      <div class="download-box">
+        <div>
+          <h2>Get HoyuShot</h2>
+          <p>Download the latest APK directly from GitHub Releases. You can also choose a pre-release build.</p>
+          <p class="version">Latest version: <span id="version">checking</span></p>
+          <label class="toggle">
+            <input type="checkbox" id="prerelease">
+            Include pre-release builds
+          </label>
+        </div>
+        <div class="download-actions">
+          <a class="btn btn-primary" id="download-btn" href="https://github.com/hoyuuna/HoyuShot_2/releases">Download APK</a>
+          <a class="btn btn-ghost" href="https://github.com/hoyuuna/HoyuShot_2/releases" target="_blank" rel="noopener">All releases</a>
+          <p class="status" id="status" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <a href="#top" class="logo">
+      <img src="https://i.postimg.cc/SRRbfNTb/logo.png" alt="">
+      <span>HOYUSHOT</span>
+    </a>
+    <span>
+      <a href="https://github.com/hoyuuna/HoyuShot_2" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/hoyuuna/HoyuShot_2/issues" target="_blank" rel="noopener">Report an issue</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Header: hidden at the top of the page, shown once the user scrolls down.
+  var header = document.getElementById("site-header");
+  function onScroll() {
+    header.classList.toggle("is-visible", window.scrollY > 120);
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Fit the screenshot frame to the image's real proportions (no forced 21:9).
+  var shotEl = document.querySelector(".shot");
+  var shotImg = shotEl.querySelector("img");
+  function fitShot() {
+    var nw = shotImg.naturalWidth, nh = shotImg.naturalHeight;
+    if (!nw || !nh) return;
+    // Visual frame is landscape: width = source height, height = source width.
+    shotEl.style.setProperty("--ar", nh + " / " + nw);
+    shotImg.style.setProperty("--k", (nw / nh).toFixed(4));
+  }
+  if (shotImg.complete) fitShot();
+  shotImg.addEventListener("load", fitShot);
+
+  // Release info from GitHub.
+  var REPO = "hoyuuna/HoyuShot_2";
+  var RELEASES_URL = "https://github.com/" + REPO + "/releases";
+  var API_LATEST = "https://api.github.com/repos/" + REPO + "/releases/latest";
+  var API_ALL = "https://api.github.com/repos/" + REPO + "/releases?per_page=10";
+
+  var versionEl = document.getElementById("version");
+  var heroVersionEl = document.getElementById("hero-version");
+  var statusEl = document.getElementById("status");
+  var btns = document.querySelectorAll('a[href="#download"].btn-primary, #download-btn');
+  var dlBtn = document.getElementById("download-btn");
+  var toggle = document.getElementById("prerelease");
+
+  function findApk(release) {
+    if (!release || !release.assets) return null;
+    for (var i = 0; i < release.assets.length; i++) {
+      if (/\.apk$/i.test(release.assets[i].name)) return release.assets[i];
+    }
+    return null;
+  }
+
+  function setRelease(release) {
+    var name = release.tag_name || release.name || "unknown";
+    versionEl.textContent = name + (release.prerelease ? " (pre-release)" : "");
+    heroVersionEl.textContent = name;
+
+    var apk = findApk(release);
+    if (apk) {
+      dlBtn.href = apk.browser_download_url;
+      dlBtn.textContent = "Download APK";
+      statusEl.textContent = apk.name + " · " + (Math.round(apk.size / 1048576 * 10) / 10) + " MB";
+    } else {
+      dlBtn.href = release.html_url || RELEASES_URL;
+      dlBtn.textContent = "View release";
+      statusEl.textContent = "This release has no APK attached.";
+    }
+  }
+
+  function fail() {
+    versionEl.textContent = "unavailable";
+    heroVersionEl.textContent = "on GitHub";
+    dlBtn.href = RELEASES_URL;
+    statusEl.textContent = "Could not reach the GitHub API. Use the releases page instead.";
+  }
+
+  function load() {
+    statusEl.textContent = "";
+    fetch(toggle.checked ? API_ALL : API_LATEST, { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var release = toggle.checked
+          ? (data.find(function (r) { return !r.draft && findApk(r); }) || data[0])
+          : data;
+        if (!release) throw new Error("No releases");
+        setRelease(release);
+      })
+      .catch(fail);
+  }
+
+  toggle.addEventListener("change", load);
+  load();
+})();
+</script>
+</body>
+</html>

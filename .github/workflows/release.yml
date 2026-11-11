@@ -9,6 +9,7 @@ on:
       - '.gitignore'
       - 'docs/**'
       - 'LICENSE'
+      - 'web/**'
   workflow_dispatch:
     inputs:
       custom_version:
