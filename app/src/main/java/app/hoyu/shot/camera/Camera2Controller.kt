@@ -136,6 +136,9 @@ class Camera2Controller(
     private var currentClampedShutter = 10_000_000L
     private var clampReleaseCooldownUntilMs = 0L
     private var forceHardwareAeOnce = false
+    private var lastHistogramFrameMs = 0L
+    private var lastFallbackProbeMs = 0L
+    private var clampedEnteredMs = 0L
     private var lumaCheckCounter = 0
 
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
@@ -267,9 +270,10 @@ class Camera2Controller(
                     if (image != null) {
                         try {
                             val hist = histogramAnalyzer.analyze(image)
+                            lastHistogramFrameMs = System.currentTimeMillis()
                             onHistogramReady(hist)
 
-                            if (isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
+                            if (!isAeLocked && isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
                                 lumaCheckCounter++
                                 if (lumaCheckCounter >= 3) {
                                     lumaCheckCounter = 0
@@ -339,22 +343,18 @@ class Camera2Controller(
         val pSurface = previewSurface ?: return
 
         try {
-            // Keep stream count minimal (Open Camera pattern) to prevent HAL driver crash on auxiliary sub-cameras
             val surfaces = mutableListOf<Surface>().apply {
                 add(pSurface)
                 jpegImageReader?.surface?.let { add(it) }
                 if (isRawCaptureEnabled && rawImageReader != null) {
                     rawImageReader?.surface?.let { add(it) }
-                } else {
-                    analysisImageReader?.surface?.let { add(it) }
                 }
+                analysisImageReader?.surface?.let { add(it) }
             }
 
             previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(pSurface)
-                if (!isRawCaptureEnabled) {
-                    analysisImageReader?.surface?.let { addTarget(it) }
-                }
+                analysisImageReader?.surface?.let { addTarget(it) }
             }
 
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
@@ -364,9 +364,15 @@ class Camera2Controller(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.w(TAG, "Capture session configuration failed, attempting fallback preview+jpeg session")
+                    Log.w(TAG, "Capture session configuration failed, attempting fallback without analysis stream")
                     try {
-                        val fallbackSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
+                        val fallbackSurfaces = mutableListOf<Surface>().apply {
+                            add(pSurface)
+                            jpegImageReader?.surface?.let { add(it) }
+                            if (isRawCaptureEnabled && rawImageReader != null) {
+                                rawImageReader?.surface?.let { add(it) }
+                            }
+                        }
                         previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(pSurface)
                         }
@@ -376,7 +382,20 @@ class Camera2Controller(
                                 applyAllSettingsInternal()
                             }
                             override fun onConfigureFailed(s: CameraCaptureSession) {
-                                onError("Failed to configure CameraCaptureSession")
+                                if (isRawCaptureEnabled) {
+                                    val minimalSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
+                                    device.createCaptureSession(minimalSurfaces, object : CameraCaptureSession.StateCallback() {
+                                        override fun onConfigured(minSession: CameraCaptureSession) {
+                                            captureSession = minSession
+                                            applyAllSettingsInternal()
+                                        }
+                                        override fun onConfigureFailed(s2: CameraCaptureSession) {
+                                            onError("Failed to configure CameraCaptureSession")
+                                        }
+                                    }, backgroundHandler)
+                                } else {
+                                    onError("Failed to configure CameraCaptureSession")
+                                }
                             }
                         }, backgroundHandler)
                     } catch (e: Exception) {
@@ -405,19 +424,30 @@ class Camera2Controller(
 
             // When in Auto or Program mode with limits active and NOT yet clamped:
             // Intervene the moment native AE breaches the user-defined bounds (after any release cooldown)
-            if (!isExposureClamped &&
-                System.currentTimeMillis() >= clampReleaseCooldownUntilMs &&
-                (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
-            ) {
-                val isoRange = currentCharacteristics?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-                val minIso = isoRange?.lower ?: 50
-                val maxIso = isoRange?.upper ?: 6400
-                val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
-                val shouldClampShutter = minShutterLimitNanos != null &&
-                    shutter > (minShutterLimitNanos!! * 1.08).toLong()
-                val shouldClampIso = maxIsoLimit != null &&
-                    iso > (effectiveMaxIso + (effectiveMaxIso * 0.08).toInt().coerceAtLeast(8))
-                if (shouldClampShutter || shouldClampIso) {
+            val now = System.currentTimeMillis()
+            if (!isAeLocked && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
+                if (!isExposureClamped && now >= clampReleaseCooldownUntilMs) {
+                    val isoRange = currentCharacteristics?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                    val minIso = isoRange?.lower ?: 50
+                    val maxIso = isoRange?.upper ?: 6400
+                    val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
+                    val shouldClampShutter = minShutterLimitNanos != null &&
+                        shutter > (minShutterLimitNanos!! * 1.08).toLong()
+                    val shouldClampIso = maxIsoLimit != null &&
+                        iso > (effectiveMaxIso + (effectiveMaxIso * 0.08).toInt().coerceAtLeast(8))
+                    if (shouldClampShutter || shouldClampIso) {
+                        applyAllSettingsInternal()
+                    }
+                } else if (isExposureClamped &&
+                    now - clampedEnteredMs > 1800L &&
+                    now - lastHistogramFrameMs > 1800L &&
+                    now - lastFallbackProbeMs > 1800L
+                ) {
+                    // Fallback when YUV analysis stream isn't active: periodically probe hardware AE so clamp cannot stick
+                    lastFallbackProbeMs = now
+                    isExposureClamped = false
+                    forceHardwareAeOnce = true
+                    clampReleaseCooldownUntilMs = now + 450L
                     applyAllSettingsInternal()
                 }
             }
@@ -437,7 +467,7 @@ class Camera2Controller(
             count += c
         }
         val avgLuma = if (count > 0) (sum / count).toDouble() else 128.0
-        val targetLuma = (120.0 * Math.pow(2.0, currentEvIndex / 3.0)).coerceIn(55.0, 200.0)
+        val targetLuma = (120.0 * Math.pow(2.0, currentEvIndex / 3.0)).coerceIn(55.0, 185.0)
 
         val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
         val minIso = isoRange?.lower ?: 50
@@ -453,7 +483,10 @@ class Camera2Controller(
             currentClampedShutter.coerceAtLeast(minShutter).toDouble()
         val rawRatio = targetLuma / avgLuma.coerceAtLeast(8.0)
         val damping = if (avgLuma > 200.0 || avgLuma < 40.0) 0.9 else 0.55
-        val stepRatio = 1.0 + (rawRatio - 1.0) * damping
+        var stepRatio = 1.0 + (rawRatio - 1.0) * damping
+        if (avgLuma > 220.0) {
+            stepRatio = minOf(stepRatio, 0.35)
+        }
         val desiredExposure = currentExposure * stepRatio
 
         if (minShutterLimitNanos != null) {
@@ -783,6 +816,7 @@ class Camera2Controller(
 
                         if (isShutterViolated || isIsoViolated) {
                             isExposureClamped = true
+                            clampedEnteredMs = System.currentTimeMillis()
                             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                             val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble())
                                 .coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
@@ -1341,6 +1375,9 @@ class Camera2Controller(
         isExposureClamped = false
         forceHardwareAeOnce = false
         clampReleaseCooldownUntilMs = 0L
+        lastHistogramFrameMs = 0L
+        lastFallbackProbeMs = 0L
+        clampedEnteredMs = 0L
         lumaCheckCounter = 0
         onLongExposureStateChanged?.invoke(false)
         onExposureCompleted?.invoke()
