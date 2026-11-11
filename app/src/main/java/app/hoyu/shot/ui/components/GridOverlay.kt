@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import app.hoyu.shot.model.GridMode
 
 @Composable
@@ -15,42 +16,31 @@ fun GridOverlay(
 ) {
     if (gridMode == GridMode.NONE) return
 
-    val gridColor = Color(0x38FFFFFF)
-    val strokeWidth = 1.2f
+    val gridColor = Color(0xCCFFFFFF)
+    val shadowColor = Color(0x59000000)
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
         val height = size.height
+        val strokeWidth = 1.25.dp.toPx()
+        val shadowStrokeWidth = 2.5.dp.toPx()
 
-        when (gridMode) {
-            GridMode.THIRDS -> {
-                // Rule of Thirds: 2 vertical lines, 2 horizontal lines
-                val v1 = width / 3f
-                val v2 = width * 2f / 3f
-                val h1 = height / 3f
-                val h2 = height * 2f / 3f
+        val (v1, v2, h1, h2) = when (gridMode) {
+            GridMode.THIRDS -> listOf(width / 3f, width * 2f / 3f, height / 3f, height * 2f / 3f)
+            GridMode.GOLDEN -> listOf(width * 0.382f, width * 0.618f, height * 0.382f, height * 0.618f)
+            GridMode.NONE -> return@Canvas
+        }
 
-                drawLine(gridColor, Offset(v1, 0f), Offset(v1, height), strokeWidth)
-                drawLine(gridColor, Offset(v2, 0f), Offset(v2, height), strokeWidth)
-                drawLine(gridColor, Offset(0f, h1), Offset(width, h1), strokeWidth)
-                drawLine(gridColor, Offset(0f, h2), Offset(width, h2), strokeWidth)
-            }
-            GridMode.GOLDEN -> {
-                // Golden ratio lines (0.382 and 0.618)
-                val phi1 = 0.382f
-                val phi2 = 0.618f
+        val lines = listOf(
+            Offset(v1, 0f) to Offset(v1, height),
+            Offset(v2, 0f) to Offset(v2, height),
+            Offset(0f, h1) to Offset(width, h1),
+            Offset(0f, h2) to Offset(width, h2)
+        )
 
-                val v1 = width * phi1
-                val v2 = width * phi2
-                val h1 = height * phi1
-                val h2 = height * phi2
-
-                drawLine(gridColor, Offset(v1, 0f), Offset(v1, height), strokeWidth)
-                drawLine(gridColor, Offset(v2, 0f), Offset(v2, height), strokeWidth)
-                drawLine(gridColor, Offset(0f, h1), Offset(width, h1), strokeWidth)
-                drawLine(gridColor, Offset(0f, h2), Offset(width, h2), strokeWidth)
-            }
-            GridMode.NONE -> {}
+        lines.forEach { (start, end) ->
+            drawLine(shadowColor, start, end, shadowStrokeWidth)
+            drawLine(gridColor, start, end, strokeWidth)
         }
     }
 }

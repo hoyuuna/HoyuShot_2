@@ -133,6 +133,9 @@ class Camera2Controller(
     var maxIsoLimit: Int? = null
     private var isExposureClamped = false
     private var currentClampedIso = 100
+    private var currentClampedShutter = 10_000_000L
+    private var clampReleaseCooldownUntilMs = 0L
+    private var forceHardwareAeOnce = false
     private var lumaCheckCounter = 0
 
     private val _capabilities = MutableStateFlow<HardwareCapabilities?>(null)
@@ -268,7 +271,7 @@ class Camera2Controller(
 
                             if (isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
                                 lumaCheckCounter++
-                                if (lumaCheckCounter >= 6) {
+                                if (lumaCheckCounter >= 3) {
                                     lumaCheckCounter = 0
                                     adjustClampedExposure(hist)
                                 }
@@ -401,10 +404,19 @@ class Camera2Controller(
             onFrameMetadata(iso, shutter)
 
             // When in Auto or Program mode with limits active and NOT yet clamped:
-            // Intervene the moment native AE breaches the user-defined bounds
-            if (!isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
-                val shouldClampShutter = minShutterLimitNanos != null && shutter > minShutterLimitNanos!!
-                val shouldClampIso = maxIsoLimit != null && iso > (maxIsoLimit ?: Int.MAX_VALUE)
+            // Intervene the moment native AE breaches the user-defined bounds (after any release cooldown)
+            if (!isExposureClamped &&
+                System.currentTimeMillis() >= clampReleaseCooldownUntilMs &&
+                (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
+            ) {
+                val isoRange = currentCharacteristics?.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val minIso = isoRange?.lower ?: 50
+                val maxIso = isoRange?.upper ?: 6400
+                val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
+                val shouldClampShutter = minShutterLimitNanos != null &&
+                    shutter > (minShutterLimitNanos!! * 1.08).toLong()
+                val shouldClampIso = maxIsoLimit != null &&
+                    iso > (effectiveMaxIso + (effectiveMaxIso * 0.08).toInt().coerceAtLeast(8))
                 if (shouldClampShutter || shouldClampIso) {
                     applyAllSettingsInternal()
                 }
@@ -424,35 +436,86 @@ class Camera2Controller(
             sum += i * c
             count += c
         }
-        val avgLuma = if (count > 0) (sum / count).toInt() else 128
+        val avgLuma = if (count > 0) (sum / count).toDouble() else 128.0
+        val targetLuma = (120.0 * Math.pow(2.0, currentEvIndex / 3.0)).coerceIn(55.0, 200.0)
 
         val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
         val minIso = isoRange?.lower ?: 50
         val maxIso = isoRange?.upper ?: 6400
         val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
 
-        // If at minIso and scene is significantly bright (overexposed), return to hardware AE to shoot faster!
-        if (currentClampedIso <= minIso + 20 && avgLuma > 140) {
-            isExposureClamped = false
-            applyAllSettingsInternal()
-            return
-        }
+        val shutterRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        val minShutter = shutterRange?.lower ?: 100_000L
+        val maxShutter = shutterRange?.upper ?: 1_000_000_000L
+        val effectiveMaxShutter = minShutterLimitNanos?.coerceIn(minShutter, maxShutter) ?: maxShutter
 
-        // Target luma is ~120 (standard 18% gray in 8-bit sRGB)
-        // If error > 12 luma levels, gently adjust ISO to balance exposure
-        if (Math.abs(avgLuma - 120) > 12) {
-            val factor = 120.0 / avgLuma.coerceAtLeast(15)
-            val stepFactor = 1.0 + (factor - 1.0) * 0.35
-            val newIso = (currentClampedIso * stepFactor).toInt().coerceIn(minIso, effectiveMaxIso)
-            if (Math.abs(newIso - currentClampedIso) >= 15) {
-                currentClampedIso = newIso
-                builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
-                try {
-                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error updating clamped ISO", e)
+        val currentExposure = currentClampedIso.coerceAtLeast(minIso).toDouble() *
+            currentClampedShutter.coerceAtLeast(minShutter).toDouble()
+        val rawRatio = targetLuma / avgLuma.coerceAtLeast(8.0)
+        val damping = if (avgLuma > 200.0 || avgLuma < 40.0) 0.9 else 0.55
+        val stepRatio = 1.0 + (rawRatio - 1.0) * damping
+        val desiredExposure = currentExposure * stepRatio
+
+        if (minShutterLimitNanos != null) {
+            val minPossibleExposure = minIso.toDouble() * effectiveMaxShutter.toDouble()
+            // Scene is bright enough to shoot faster than minShutterLimit at minIso -> release back to hardware AE
+            if ((currentClampedIso <= minIso + 5 && avgLuma > targetLuma + 12.0) ||
+                desiredExposure < minPossibleExposure * 0.96
+            ) {
+                isExposureClamped = false
+                forceHardwareAeOnce = true
+                clampReleaseCooldownUntilMs = System.currentTimeMillis() + 700L
+                applyAllSettingsInternal()
+                return
+            }
+
+            if (Math.abs(avgLuma - targetLuma) > 10.0 || currentClampedShutter != effectiveMaxShutter) {
+                val newIso = (desiredExposure / effectiveMaxShutter.toDouble()).toInt().coerceIn(minIso, effectiveMaxIso)
+                if (newIso != currentClampedIso || currentClampedShutter != effectiveMaxShutter) {
+                    currentClampedShutter = effectiveMaxShutter
+                    currentClampedIso = newIso
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
+                    try {
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error updating clamped exposure", e)
+                    }
                 }
             }
+        } else if (maxIsoLimit != null) {
+            // Only ISO ceiling is active: release when bright enough for <= 1/60s well below maxIsoLimit
+            val comfortThresholdExposure = effectiveMaxIso.toDouble() * 16_666_667.0 * 0.65
+            if ((desiredExposure < comfortThresholdExposure && avgLuma > targetLuma + 10.0) ||
+                (currentClampedShutter <= minShutter + (minShutter / 10L) && avgLuma > targetLuma + 12.0)
+            ) {
+                isExposureClamped = false
+                forceHardwareAeOnce = true
+                clampReleaseCooldownUntilMs = System.currentTimeMillis() + 700L
+                applyAllSettingsInternal()
+                return
+            }
+
+            if (Math.abs(avgLuma - targetLuma) > 10.0 || currentClampedIso != effectiveMaxIso) {
+                val newShutter = (desiredExposure / effectiveMaxIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
+                if (Math.abs(newShutter - currentClampedShutter) > (currentClampedShutter / 20L).coerceAtLeast(10_000L) ||
+                    currentClampedIso != effectiveMaxIso
+                ) {
+                    currentClampedIso = effectiveMaxIso
+                    currentClampedShutter = newShutter
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
+                    try {
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error updating ISO-clamped shutter", e)
+                    }
+                }
+            }
+        } else {
+            isExposureClamped = false
+            forceHardwareAeOnce = true
+            applyAllSettingsInternal()
         }
     }
 
@@ -627,10 +690,17 @@ class Camera2Controller(
         this.currentFlashMode = flashMode
         this.currentNoiseReduction = noiseReduction
         this.currentSharpness = sharpness
+        val prevMinShutter = this.minShutterLimitNanos
+        val prevMaxIso = this.maxIsoLimit
         this.minShutterLimitNanos = minShutterLimitNanos
         this.maxIsoLimit = maxIsoLimit
         if (minShutterLimitNanos == null && maxIsoLimit == null) {
             isExposureClamped = false
+            forceHardwareAeOnce = true
+            clampReleaseCooldownUntilMs = 0L
+        } else if (prevMinShutter != minShutterLimitNanos || prevMaxIso != maxIsoLimit) {
+            isExposureClamped = false
+            clampReleaseCooldownUntilMs = 0L
         }
 
         applyAllSettingsInternal()
@@ -680,34 +750,66 @@ class Camera2Controller(
             when (currentExposureMode) {
                 ExposureMode.AUTO, ExposureMode.PROGRAM -> {
                     val effectiveMaxIso = maxIsoLimit?.coerceIn(minIso, maxIso) ?: maxIso
-                    val isShutterViolated = minShutterLimitNanos != null && lastMeasuredShutter > minShutterLimitNanos!!
-                    val isIsoViolated = maxIsoLimit != null && lastMeasuredIso > effectiveMaxIso
+                    val effectiveMaxShutter = minShutterLimitNanos?.coerceIn(minShutter, maxShutter) ?: maxShutter
+                    val hasAnyLimit = minShutterLimitNanos != null || maxIsoLimit != null
 
-                    if (isShutterViolated || isIsoViolated) {
-                        isExposureClamped = true
-                        // User-defined Auto limits breached -> intervene with manual override to protect shutter/ISO bounds
-                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                        val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble()).coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
-
-                        if (isShutterViolated) {
-                            val enforcedShutter = minShutterLimitNanos!!.coerceIn(minShutter, maxShutter)
-                            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, enforcedShutter)
-                            currentClampedIso = (targetExposure / enforcedShutter.toDouble()).toInt().coerceIn(minIso, effectiveMaxIso)
-                            builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
-                        } else {
-                            currentClampedIso = effectiveMaxIso
-                            builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
-                            val dynShutter = (targetExposure / effectiveMaxIso.toDouble()).toLong().coerceIn(minShutter, maxShutter)
-                            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
-                        }
-                    } else {
+                    if (forceHardwareAeOnce || !hasAnyLimit) {
+                        forceHardwareAeOnce = false
                         isExposureClamped = false
-                        // Fully automated AE with user EV compensation
                         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                         builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
+                    } else if (isExposureClamped) {
+                        // Preserve active clamped exposure state across non-exposure updates (zoom, focus, WB, etc.)
+                        currentClampedShutter = if (minShutterLimitNanos != null) {
+                            effectiveMaxShutter
+                        } else {
+                            currentClampedShutter.coerceIn(minShutter, maxShutter)
+                        }
+                        currentClampedIso = if (minShutterLimitNanos == null && maxIsoLimit != null) {
+                            effectiveMaxIso
+                        } else {
+                            currentClampedIso.coerceIn(minIso, effectiveMaxIso)
+                        }
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                        builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
+                        builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
+                    } else {
+                        val isShutterViolated = System.currentTimeMillis() >= clampReleaseCooldownUntilMs &&
+                            minShutterLimitNanos != null &&
+                            lastMeasuredShutter > (minShutterLimitNanos!! * 1.08).toLong()
+                        val isIsoViolated = System.currentTimeMillis() >= clampReleaseCooldownUntilMs &&
+                            maxIsoLimit != null &&
+                            lastMeasuredIso > (effectiveMaxIso + (effectiveMaxIso * 0.08).toInt().coerceAtLeast(8))
+
+                        if (isShutterViolated || isIsoViolated) {
+                            isExposureClamped = true
+                            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                            val targetExposure = (lastMeasuredIso.toDouble() * lastMeasuredShutter.toDouble())
+                                .coerceAtLeast(minIso.toDouble() * minShutter.toDouble())
+
+                            if (isShutterViolated) {
+                                currentClampedShutter = effectiveMaxShutter
+                                currentClampedIso = (targetExposure / currentClampedShutter.toDouble())
+                                    .toInt()
+                                    .coerceIn(minIso, effectiveMaxIso)
+                            } else {
+                                currentClampedIso = effectiveMaxIso
+                                currentClampedShutter = (targetExposure / currentClampedIso.toDouble())
+                                    .toLong()
+                                    .coerceIn(minShutter, effectiveMaxShutter)
+                            }
+                            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentClampedShutter)
+                            builder.set(CaptureRequest.SENSOR_SENSITIVITY, currentClampedIso)
+                        } else {
+                            isExposureClamped = false
+                            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                            builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, validEv)
+                        }
                     }
                 }
                 ExposureMode.SHUTTER_PRIORITY -> {
+                    isExposureClamped = false
+                    forceHardwareAeOnce = false
                     // Lock Shutter, dynamically balance ISO using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, validShutter)
@@ -716,6 +818,8 @@ class Camera2Controller(
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, dynIso)
                 }
                 ExposureMode.ISO_PRIORITY -> {
+                    isExposureClamped = false
+                    forceHardwareAeOnce = false
                     // Lock ISO, dynamically balance Shutter using current scene brightness
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
@@ -724,6 +828,8 @@ class Camera2Controller(
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dynShutter)
                 }
                 ExposureMode.MANUAL -> {
+                    isExposureClamped = false
+                    forceHardwareAeOnce = false
                     // Full manual control
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, validIso)
@@ -1232,6 +1338,10 @@ class Camera2Controller(
 
     fun closeCamera() {
         isCapturing = false
+        isExposureClamped = false
+        forceHardwareAeOnce = false
+        clampReleaseCooldownUntilMs = 0L
+        lumaCheckCounter = 0
         onLongExposureStateChanged?.invoke(false)
         onExposureCompleted?.invoke()
         try {
