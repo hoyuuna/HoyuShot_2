@@ -229,6 +229,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
         cameraController.antibandingMode = settingsRepo.antibandingMode
         cameraController.cameraSoundMode = settingsRepo.cameraSoundMode
+        cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
 
         _uiState.update {
             it.copy(
@@ -276,7 +277,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isUiBlurEnabled = settingsRepo.isUiBlurEnabled,
                 isAutoUpdateCheckEnabled = settingsRepo.isAutoUpdateCheckEnabled,
                 isPreReleaseUpdateEnabled = settingsRepo.isPreReleaseUpdateEnabled,
-                isTeleZoomFallbackEnabled = settingsRepo.isTeleZoomFallbackEnabled
+                isTeleZoomFallbackEnabled = settingsRepo.isTeleZoomFallbackEnabled,
+                isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
             )
         }
 
@@ -1013,6 +1015,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val next = !_uiState.value.isTeleZoomFallbackEnabled
         _uiState.update { it.copy(isTeleZoomFallbackEnabled = next) }
         settingsRepo.isTeleZoomFallbackEnabled = next
+    }
+
+    fun toggleExifSoftwareTag() {
+        val next = !_uiState.value.isExifSoftwareTagEnabled
+        _uiState.update { it.copy(isExifSoftwareTagEnabled = next) }
+        settingsRepo.isExifSoftwareTagEnabled = next
+        cameraController.isExifSoftwareTagEnabled = next
     }
 
     fun toggleCameraFacing() {

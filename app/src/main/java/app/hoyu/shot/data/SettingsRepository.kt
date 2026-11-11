@@ -168,4 +168,8 @@ class SettingsRepository(context: Context) {
     var isTeleZoomFallbackEnabled: Boolean
         get() = prefs.getBoolean("adv_tele_zoom_fallback", true)
         set(value) = prefs.edit().putBoolean("adv_tele_zoom_fallback", value).apply()
+
+    var isExifSoftwareTagEnabled: Boolean
+        get() = prefs.getBoolean("adv_exif_software_tag", true)
+        set(value) = prefs.edit().putBoolean("adv_exif_software_tag", value).apply()
 }

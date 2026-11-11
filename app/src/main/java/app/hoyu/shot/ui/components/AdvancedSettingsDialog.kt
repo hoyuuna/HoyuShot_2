@@ -53,6 +53,7 @@ fun AdvancedSettingsDialog(
     onToggleAutoUpdateCheck: () -> Unit,
     onTogglePreReleaseUpdate: () -> Unit,
     onToggleTeleZoomFallback: () -> Unit = {},
+    onToggleExifSoftwareTag: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -226,6 +227,14 @@ fun AdvancedSettingsDialog(
                     subtitle = if (uiState.isTeleZoomFallbackEnabled) "Last resort bypass: simulates auxiliary lenses via primary camera zoom if physical sensor access is blocked by HAL" else "Standard physical sensor switch (reverts to 1x without zoom if blocked by HAL)",
                     isActive = uiState.isTeleZoomFallbackEnabled,
                     onToggle = onToggleTeleZoomFallback
+                )
+
+                // EXIF Software Signature Toggle ("Hoyuuna HoyuShot")
+                SettingsToggleRow(
+                    title = "EXIF SOFTWARE SIGNATURE",
+                    subtitle = if (uiState.isExifSoftwareTagEnabled) "Write Software: Hoyuuna HoyuShot into saved photo EXIF" else "Keep EXIF Software tag blank (default HAL output)",
+                    isActive = uiState.isExifSoftwareTagEnabled,
+                    onToggle = onToggleExifSoftwareTag
                 )
 
                 // Antibanding Mode

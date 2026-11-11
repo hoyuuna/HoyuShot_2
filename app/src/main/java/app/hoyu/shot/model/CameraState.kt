@@ -137,6 +137,7 @@ data class CameraUiState(
     val isAutoUpdateCheckEnabled: Boolean = true,
     val isPreReleaseUpdateEnabled: Boolean = true,
     val isTeleZoomFallbackEnabled: Boolean = true,
+    val isExifSoftwareTagEnabled: Boolean = true,
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),

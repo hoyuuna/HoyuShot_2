@@ -75,6 +75,9 @@ class Camera2Controller(
                 locationHelper.stopListening()
             }
         }
+    @Volatile var isExifSoftwareTagEnabled: Boolean = true
+    @Volatile private var lastCapturedIso: Int? = null
+    @Volatile private var lastCapturedExposureNanos: Long? = null
     var onExposureCompleted: (() -> Unit)? = null
     var onLongExposureStateChanged: ((Boolean) -> Unit)? = null
     var onCaptureError: ((String) -> Unit)? = null
@@ -1212,6 +1215,8 @@ class Camera2Controller(
                 onLongExposureStateChanged?.invoke(true)
             }
 
+            lastCapturedIso = null
+            lastCapturedExposureNanos = null
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
                     session: CameraCaptureSession,
@@ -1233,6 +1238,8 @@ class Camera2Controller(
                     result: TotalCaptureResult
                 ) {
                     super.onCaptureCompleted(session, request, result)
+                    result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { if (it > 0) lastCapturedIso = it }
+                    result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { if (it > 0L) lastCapturedExposureNanos = it }
 
                     if (willCaptureRaw) {
                         val ts = result.get(CaptureResult.SENSOR_TIMESTAMP)
@@ -1361,6 +1368,24 @@ class Camera2Controller(
         var imgHeight = 3000
         var finalExifOrientation = ExifInterface.ORIENTATION_NORMAL
 
+        val chars = currentCharacteristics
+        val apertures = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+        val apertureFloat = apertures?.firstOrNull()?.takeIf { it > 0f } ?: 1.8f
+        val ap = String.format(Locale.US, "f/%.1f", apertureFloat)
+        val focalArr = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val focalFloat = focalArr?.firstOrNull()?.takeIf { it > 0f } ?: 5.0f
+        val focalStr = String.format(Locale.US, "%.1fmm", focalFloat)
+        val effectiveIso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) {
+            (lastCapturedIso ?: lastMeasuredIso).coerceAtLeast(1)
+        } else {
+            currentIso.coerceAtLeast(1)
+        }
+        val effectiveExposureNanos = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) {
+            (lastCapturedExposureNanos ?: lastMeasuredShutter).coerceAtLeast(1L)
+        } else {
+            currentShutterNanos.coerceAtLeast(1L)
+        }
+
         try {
             tempFile.outputStream().use { fos ->
                 fos.write(finalBytes)
@@ -1405,6 +1430,49 @@ class Camera2Controller(
             if (!Build.MODEL.isNullOrBlank()) {
                 exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
             }
+            if (isExifSoftwareTagEnabled) {
+                exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Hoyuuna HoyuShot")
+            }
+
+            // Fill standard exposure / lens tags if Camera2 HAL omitted them in JPEG APP1
+            val existingIso = exif.getAttributeInt(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, 0)
+                .takeIf { it > 0 }
+                ?: exif.getAttributeInt(ExifInterface.TAG_ISO_SPEED_RATINGS, 0)
+            if (existingIso <= 0) {
+                exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, effectiveIso.toString())
+            }
+            if (exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0) <= 0.0) {
+                exif.setAttribute(
+                    ExifInterface.TAG_EXPOSURE_TIME,
+                    String.format(Locale.US, "%.6f", effectiveExposureNanos / 1_000_000_000.0)
+                )
+            }
+            if (exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0) <= 0.0) {
+                exif.setAttribute(ExifInterface.TAG_F_NUMBER, String.format(Locale.US, "%.2f", apertureFloat))
+            }
+            if (exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0) <= 0.0) {
+                exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, String.format(Locale.US, "%.2f", focalFloat))
+            }
+            if (exif.getAttribute(ExifInterface.TAG_LENS_MAKE).isNullOrBlank() && makeName.isNotBlank()) {
+                exif.setAttribute(ExifInterface.TAG_LENS_MAKE, makeName)
+            }
+            if (exif.getAttribute(ExifInterface.TAG_LENS_MODEL).isNullOrBlank()) {
+                val facingLabel = when (chars?.get(CameraCharacteristics.LENS_FACING)) {
+                    CameraCharacteristics.LENS_FACING_FRONT -> "Front"
+                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "External"
+                    else -> "Rear"
+                }
+                val lensModel = listOfNotNull(
+                    makeName.takeIf { it.isNotBlank() },
+                    Build.MODEL?.takeIf { it.isNotBlank() },
+                    facingLabel,
+                    focalStr,
+                    ap
+                ).joinToString(" ")
+                if (lensModel.isNotBlank()) {
+                    exif.setAttribute(ExifInterface.TAG_LENS_MODEL, lensModel)
+                }
+            }
             exif.saveAttributes()
 
             if (imgWidth <= 0 || imgHeight <= 0) {
@@ -1448,19 +1516,7 @@ class Camera2Controller(
                 tempFile.delete()
             }
 
-            val chars = currentCharacteristics
-            val apertures = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
-            val ap = if (apertures != null && apertures.isNotEmpty()) "f/${apertures[0]}" else "f/1.8"
-            val focalArr = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-            val focalStr = if (focalArr != null && focalArr.isNotEmpty()) {
-                String.format(Locale.US, "%.1fmm", focalArr[0])
-            } else {
-                "5.0mm"
-            }
-
-            val shutterStr = HardwareCapabilities.formatShutterSpeed(
-                if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) lastMeasuredShutter else currentShutterNanos
-            )
+            val shutterStr = HardwareCapabilities.formatShutterSpeed(effectiveExposureNanos)
             val isExifRotated = finalExifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
                 finalExifOrientation == ExifInterface.ORIENTATION_ROTATE_270
             val info = CapturedPhotoInfo(
@@ -1468,7 +1524,7 @@ class Camera2Controller(
                 isRaw = false,
                 width = if (isExifRotated) imgHeight else imgWidth,
                 height = if (isExifRotated) imgWidth else imgHeight,
-                iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) lastMeasuredIso else currentIso,
+                iso = effectiveIso,
                 shutterSpeed = shutterStr,
                 focalLength = focalStr,
                 timestamp = System.currentTimeMillis(),
