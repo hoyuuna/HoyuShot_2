@@ -48,6 +48,7 @@ fun SettingsDialog(
     onToggleHorizon: () -> Unit,
     onTogglePeaking: () -> Unit,
     onToggleZebra: () -> Unit,
+    onToggleSunCompass: () -> Unit = {},
     onOpenAdvancedSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -400,6 +401,19 @@ fun SettingsDialog(
                         isActive = uiState.isZebraStripesEnabled,
                         onClick = onToggleZebra,
                         modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Separate row for Sun Compass HUD (defaults OFF)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ConfigToggleItem(
+                        title = "SUN COMPASS",
+                        isActive = uiState.isSunCompassEnabled,
+                        onClick = onToggleSunCompass,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
 

@@ -17,12 +17,14 @@ class LocationHelper(private val context: Context) {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     private var cachedLocation: Location? = null
     private var isListening = false
+    var onLocationChangedCallback: ((Location) -> Unit)? = null
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             val current = cachedLocation
             if (current == null || location.time >= current.time - 5000L) {
                 cachedLocation = location
+                onLocationChangedCallback?.invoke(location)
             }
         }
         @Deprecated("Deprecated in Java")
@@ -49,8 +51,8 @@ class LocationHelper(private val context: Context) {
                     try {
                         lm.requestLocationUpdates(
                             provider,
-                            1000L,
-                            0f,
+                            5000L,
+                            5f,
                             locationListener,
                             Looper.getMainLooper()
                         )

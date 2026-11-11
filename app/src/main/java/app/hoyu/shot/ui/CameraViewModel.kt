@@ -1,6 +1,7 @@
 package app.hoyu.shot.ui
 
 import android.app.Application
+import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -15,6 +16,8 @@ import app.hoyu.shot.data.SettingsRepository
 import app.hoyu.shot.model.*
 import app.hoyu.shot.sensors.DeviceOrientationListener
 import app.hoyu.shot.sensors.HorizonSensorManager
+import app.hoyu.shot.sensors.SunCalculator
+import app.hoyu.shot.sensors.SunCompassManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -42,11 +46,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val horizonSensor = HorizonSensorManager(application)
     private val orientationListener = DeviceOrientationListener(application)
+    private val sunCompassManager = SunCompassManager(application)
     private val inspector = CameraHardwareInspector(application)
     private val settingsRepo = SettingsRepository(application)
 
     private var activeSurface: Surface? = null
     private var timerJob: Job? = null
+    private var sunRefreshJob: Job? = null
+    private var lastSunLocation: Location? = null
     private var lastAttemptedLens: LensItem? = null
     private val failedPhysicalCameraIds = mutableSetOf<String>()
 
@@ -134,8 +141,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             orientationListener.rotationDegrees.collect { deg ->
                 horizonSensor.currentUiRotationDegrees = deg
+                sunCompassManager.currentUiRotationDegrees = deg
                 cameraController.deviceOrientationDegrees = deg.toInt()
                 _uiState.update { it.copy(uiRotationDegrees = deg) }
+            }
+        }
+
+        // Collect live compass heading for Sun Compass HUD
+        viewModelScope.launch {
+            sunCompassManager.headingDegrees.collect { heading ->
+                if (_uiState.value.isSunCompassEnabled) {
+                    _uiState.update { current ->
+                        val s = current.sunCompassState
+                        val rel = (((s.sunAzimuthDeg - heading) + 540.0) % 360.0 - 180.0).toFloat()
+                        current.copy(
+                            sunCompassState = s.copy(
+                                cameraHeadingDeg = heading,
+                                relativeAngleDeg = rel
+                            )
+                        )
+                    }
+                }
             }
         }
 
@@ -221,7 +247,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (settingsRepo.isGeotaggingEnabled && !hasLocPerm) {
             settingsRepo.isGeotaggingEnabled = false
         }
+        val initSunCompass = settingsRepo.savedSunCompassEnabled && hasLocPerm
+        if (settingsRepo.savedSunCompassEnabled && !hasLocPerm) {
+            settingsRepo.savedSunCompassEnabled = false
+        }
+        sunCompassManager.isFrontCamera = defaultLens?.isFront == true
         cameraController.isGeotaggingEnabled = initGeo
+        cameraController.isSunCompassLocationNeeded = initSunCompass
+        cameraController.setOnLocationUpdated { loc ->
+            updateSunLocation(loc)
+        }
         cameraController.captureFormat = initFormat
         cameraController.isPeakingOverlayEnabled = initPeaking
         cameraController.isZebraOverlayEnabled = initZebra
@@ -267,6 +302,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isFocusPeakingEnabled = initPeaking,
                 isZebraStripesEnabled = initZebra,
                 isGeotaggingEnabled = initGeo,
+                isSunCompassEnabled = initSunCompass,
                 jpegQuality = settingsRepo.jpegQuality,
                 isMirrorSelfie = settingsRepo.isMirrorSelfie,
                 cameraSoundMode = settingsRepo.cameraSoundMode,
@@ -305,11 +341,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun startSensors() {
         horizonSensor.start()
         orientationListener.start()
-        if (_uiState.value.isGeotaggingEnabled) {
+        val needGeo = _uiState.value.isGeotaggingEnabled
+        val needSun = _uiState.value.isSunCompassEnabled
+        if (needGeo || needSun) {
             if (cameraController.hasLocationPermission()) {
                 cameraController.resumeLocation()
+                if (needSun) {
+                    sunCompassManager.start()
+                    updateSunLocation(cameraController.getBestLocation())
+                    startSunRefreshLoop()
+                }
             } else {
-                setGeotaggingEnabled(false)
+                if (needGeo) setGeotaggingEnabled(false)
+                if (needSun) setSunCompassEnabled(false)
             }
         }
     }
@@ -317,6 +361,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun stopSensors() {
         horizonSensor.stop()
         orientationListener.stop()
+        sunCompassManager.stop()
+        sunRefreshJob?.cancel()
         cameraController.pauseLocation()
     }
 
@@ -555,6 +601,70 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setGeotaggingEnabled(next)
     }
 
+    fun setSunCompassEnabled(enabled: Boolean) {
+        val actual = if (enabled) cameraController.hasLocationPermission() else false
+        _uiState.update { it.copy(isSunCompassEnabled = actual) }
+        settingsRepo.savedSunCompassEnabled = actual
+        cameraController.isSunCompassLocationNeeded = actual
+        if (actual) {
+            sunCompassManager.isFrontCamera = _uiState.value.currentLens?.isFront == true
+            sunCompassManager.start()
+            updateSunLocation(cameraController.getBestLocation())
+            startSunRefreshLoop()
+        } else {
+            sunCompassManager.stop()
+            sunRefreshJob?.cancel()
+        }
+    }
+
+    fun toggleSunCompass() {
+        val next = !_uiState.value.isSunCompassEnabled
+        setSunCompassEnabled(next)
+    }
+
+    private fun updateSunLocation(location: Location?) {
+        if (location != null) {
+            lastSunLocation = location
+            sunCompassManager.updateLocation(location)
+        }
+        if (_uiState.value.isSunCompassEnabled) {
+            recalculateSunPosition()
+        }
+    }
+
+    private fun startSunRefreshLoop() {
+        sunRefreshJob?.cancel()
+        sunRefreshJob = viewModelScope.launch {
+            while (isActive && _uiState.value.isSunCompassEnabled) {
+                recalculateSunPosition()
+                delay(300_000L) // Refresh solar ephemeris every 5 minutes (100% offline math)
+            }
+        }
+    }
+
+    private fun recalculateSunPosition() {
+        val loc = lastSunLocation ?: cameraController.getBestLocation() ?: return
+        lastSunLocation = loc
+        val pos = SunCalculator.calculate(System.currentTimeMillis(), loc.latitude, loc.longitude)
+        val heading = sunCompassManager.headingDegrees.value
+        val rel = (((pos.azimuthDeg - heading) + 540.0) % 360.0 - 180.0).toFloat()
+        val isDay = pos.altitudeDeg > -0.833
+        val isOverhead = pos.altitudeDeg >= 72.0
+        _uiState.update {
+            it.copy(
+                sunCompassState = SunCompassState(
+                    hasLocation = true,
+                    sunAzimuthDeg = pos.azimuthDeg,
+                    sunAltitudeDeg = pos.altitudeDeg,
+                    cameraHeadingDeg = heading,
+                    relativeAngleDeg = rel,
+                    isDaylight = isDay,
+                    isOverhead = isOverhead
+                )
+            )
+        }
+    }
+
     fun openReviewDialog() {
         if (_uiState.value.recentPhotos.isNotEmpty() || _uiState.value.lastCapturedPhoto != null) {
             _uiState.update { it.copy(isGalleryVisible = true) }
@@ -780,6 +890,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 simulatedTeleBaseZoom = 1.0f
             )
         }
+        sunCompassManager.isFrontCamera = lens.isFront
         cameraController.currentZoomRatio = 1.0f
 
         if (lens.cameraId != currentCamId) {

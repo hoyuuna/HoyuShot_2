@@ -110,6 +110,10 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean("saved_zebra_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_zebra_enabled", value).apply()
 
+    var savedSunCompassEnabled: Boolean
+        get() = prefs.getBoolean("saved_sun_compass_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_sun_compass_enabled", value).apply()
+
     var isGeotaggingEnabled: Boolean
         get() = prefs.getBoolean("saved_geotagging_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_geotagging_enabled", value).apply()

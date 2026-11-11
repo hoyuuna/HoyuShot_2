@@ -23,6 +23,16 @@ data class ViewfinderOverlayData(
     val frameId: Long = 0L
 )
 
+data class SunCompassState(
+    val hasLocation: Boolean = false,
+    val sunAzimuthDeg: Double = 0.0,
+    val sunAltitudeDeg: Double = 0.0,
+    val cameraHeadingDeg: Float = 0f,
+    val relativeAngleDeg: Float = 0f,
+    val isDaylight: Boolean = false,
+    val isOverhead: Boolean = false
+)
+
 data class HorizonOrientation(
     val pitchDegrees: Float = 0f,
     val rollDegrees: Float = 0f,
@@ -126,6 +136,8 @@ data class CameraUiState(
     val isFocusPeakingEnabled: Boolean = false,
     val isZebraStripesEnabled: Boolean = false,
     val isGeotaggingEnabled: Boolean = false,
+    val isSunCompassEnabled: Boolean = false,
+    val sunCompassState: SunCompassState = SunCompassState(),
 
     // Advanced Config States
     val jpegQuality: Int = 95,

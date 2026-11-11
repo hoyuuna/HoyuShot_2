@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import app.hoyu.shot.model.*
 import app.hoyu.shot.ui.components.*
 import kotlinx.coroutines.*
@@ -70,15 +73,40 @@ fun CameraScreen(
     val view = LocalView.current
     val context = LocalContext.current
 
+    var pendingLocationAction by remember { mutableStateOf<String?>(null) }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (fineGranted || coarseGranted) {
-            viewModel.setGeotaggingEnabled(true)
+        val granted = fineGranted || coarseGranted
+        when (pendingLocationAction) {
+            "SUN_COMPASS" -> viewModel.setSunCompassEnabled(granted)
+            else -> viewModel.setGeotaggingEnabled(granted)
+        }
+        pendingLocationAction = null
+    }
+
+    fun requestLocationFor(action: String, onAlreadyGranted: () -> Unit) {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFine || hasCoarse) {
+            onAlreadyGranted()
         } else {
-            viewModel.setGeotaggingEnabled(false)
+            pendingLocationAction = action
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
@@ -139,9 +167,18 @@ fun CameraScreen(
 
     val shape = RoundedCornerShape(2.dp) // shadcn razor-sharp corners
 
-    DisposableEffect(Unit) {
-        viewModel.startSensors()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.startSensors()
+                Lifecycle.Event.ON_PAUSE -> viewModel.stopSensors()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             viewModel.stopSensors()
             viewModel.stopCamera()
         }
@@ -592,25 +629,7 @@ fun CameraScreen(
                 if (uiState.isGeotaggingEnabled) {
                     viewModel.setGeotaggingEnabled(false)
                 } else {
-                    val hasFine = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_FINE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    val hasCoarse = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-
-                    if (hasFine || hasCoarse) {
-                        viewModel.setGeotaggingEnabled(true)
-                    } else {
-                        locationPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
-                        )
-                    }
+                    requestLocationFor("GEOTAG") { viewModel.setGeotaggingEnabled(true) }
                 }
             },
             onCycleNoiseReduction = { viewModel.cycleNoiseReduction() },
@@ -620,6 +639,13 @@ fun CameraScreen(
             onToggleHorizon = { viewModel.toggleHorizon() },
             onTogglePeaking = { viewModel.toggleFocusPeaking() },
             onToggleZebra = { viewModel.toggleZebraStripes() },
+            onToggleSunCompass = {
+                if (uiState.isSunCompassEnabled) {
+                    viewModel.setSunCompassEnabled(false)
+                } else {
+                    requestLocationFor("SUN_COMPASS") { viewModel.setSunCompassEnabled(true) }
+                }
+            },
             onOpenAdvancedSettings = {
                 isSettingsDialogVisible = false
                 isAdvancedSettingsVisible = true
@@ -967,13 +993,17 @@ private fun ViewfinderPreviewContent(
 
         val hasLensSwitcherInPreview = uiState.availableLenses.size > 1 && uiState.aspectRatio != AspectRatio.RATIO_16_9
 
-        // Live Histogram: Positioned in corner unless obstructed by lens switcher in preview
-        if (uiState.isHistogramVisible) {
+        // Sun Compass HUD (always above Histogram; auto-hides when dark) + Live Histogram
+        if (uiState.isSunCompassEnabled || uiState.isHistogramVisible) {
             val histAlignment = when (uiState.uiRotationDegrees) {
                 90f -> Alignment.TopStart
                 180f -> Alignment.TopEnd
                 270f -> Alignment.BottomEnd
                 else -> Alignment.BottomStart
+            }
+            val histColumnAlignment = when (uiState.uiRotationDegrees) {
+                180f, 270f -> Alignment.End
+                else -> Alignment.Start
             }
             val histPadding = when (uiState.uiRotationDegrees) {
                 90f -> Modifier.padding(start = 14.dp, top = 14.dp)
@@ -981,17 +1011,32 @@ private fun ViewfinderPreviewContent(
                 270f -> if (hasLensSwitcherInPreview) Modifier.padding(end = 14.dp, bottom = 76.dp) else Modifier.padding(end = 14.dp, bottom = 14.dp)
                 else -> if (hasLensSwitcherInPreview) Modifier.padding(start = 14.dp, bottom = 76.dp) else Modifier.padding(start = 14.dp, bottom = 14.dp)
             }
-            Box(
+            Column(
                 modifier = Modifier
                     .align(histAlignment)
-                    .then(histPadding)
-                    .rotateBounds(animatedRotation)
-                    .clip(shape)
-                    .background(Color(0x77000000))
-                    .border(1.dp, Color(0x33FFFFFF), shape)
-                    .padding(4.dp)
+                    .then(histPadding),
+                horizontalAlignment = histColumnAlignment,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                HistogramView(histogram = uiState.histogram)
+                if (uiState.isSunCompassEnabled) {
+                    SunCompassHud(
+                        enabled = true,
+                        state = uiState.sunCompassState,
+                        modifier = Modifier.rotateBounds(animatedRotation)
+                    )
+                }
+                if (uiState.isHistogramVisible) {
+                    Box(
+                        modifier = Modifier
+                            .rotateBounds(animatedRotation)
+                            .clip(shape)
+                            .background(Color(0x77000000))
+                            .border(1.dp, Color(0x33FFFFFF), shape)
+                            .padding(4.dp)
+                    ) {
+                        HistogramView(histogram = uiState.histogram)
+                    }
+                }
             }
         }
 

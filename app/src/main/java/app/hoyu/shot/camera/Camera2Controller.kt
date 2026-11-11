@@ -71,12 +71,21 @@ class Camera2Controller(
     var isGeotaggingEnabled = false
         set(value) {
             field = value
-            if (value && locationHelper.hasLocationPermission()) {
-                locationHelper.startListening()
-            } else {
-                locationHelper.stopListening()
-            }
+            syncLocationListening()
         }
+    var isSunCompassLocationNeeded = false
+        set(value) {
+            field = value
+            syncLocationListening()
+        }
+
+    private fun syncLocationListening() {
+        if ((isGeotaggingEnabled || isSunCompassLocationNeeded) && locationHelper.hasLocationPermission()) {
+            locationHelper.startListening()
+        } else {
+            locationHelper.stopListening()
+        }
+    }
     @Volatile var isExifSoftwareTagEnabled: Boolean = true
     @Volatile private var lastCapturedIso: Int? = null
     @Volatile private var lastCapturedExposureNanos: Long? = null
@@ -127,10 +136,14 @@ class Camera2Controller(
 
     fun hasLocationPermission(): Boolean = locationHelper.hasLocationPermission()
 
+    fun getBestLocation(): android.location.Location? = locationHelper.getBestLocation()
+
+    fun setOnLocationUpdated(callback: ((android.location.Location) -> Unit)?) {
+        locationHelper.onLocationChangedCallback = callback
+    }
+
     fun resumeLocation() {
-        if (isGeotaggingEnabled && locationHelper.hasLocationPermission()) {
-            locationHelper.startListening()
-        }
+        syncLocationListening()
     }
 
     fun pauseLocation() {
