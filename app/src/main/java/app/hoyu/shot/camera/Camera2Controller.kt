@@ -15,9 +15,6 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
@@ -892,10 +889,6 @@ class Camera2Controller(
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
 
-            if (cameraSoundMode == "VIBRATE") {
-                triggerShutterVibration()
-            }
-
             // Correct EXIF orientation for portrait / landscape holding
             val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val isFacingFront = chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
@@ -1007,27 +1000,6 @@ class Camera2Controller(
             onExposureCompleted?.invoke()
             Log.e(TAG, "Failed to capture picture", e)
             onError("Capture error: ${e.message}")
-        }
-    }
-
-    private fun triggerShutterVibration() {
-        try {
-            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vm?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Short, snappy, full-amplitude mechanical shutter kick (single strong jolt)
-                vibrator?.vibrate(VibrationEffect.createOneShot(42L, 255))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(42L)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Shutter vibration failed", e)
         }
     }
 

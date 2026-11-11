@@ -40,7 +40,8 @@ enum class FlashMode(val label: String) {
 
 enum class TimerMode(val seconds: Int, val label: String) {
     OFF(0, "OFF"),
-    SEC_3(3, "3S"),
+    SEC_1(1, "1S"),
+    SEC_2(2, "2S"),
     SEC_5(5, "5S"),
     SEC_10(10, "10S")
 }

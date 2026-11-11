@@ -57,7 +57,8 @@ fun TopSettingsBar(
         TextButtonToggle(
             text = when (uiState.timerMode) {
                 TimerMode.OFF -> "Timer"
-                TimerMode.SEC_3 -> "3s"
+                TimerMode.SEC_1 -> "1s"
+                TimerMode.SEC_2 -> "2s"
                 TimerMode.SEC_5 -> "5s"
                 TimerMode.SEC_10 -> "10s"
             },

@@ -444,14 +444,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applyCurrentSettings()
     }
 
+    fun setTimerMode(mode: TimerMode) {
+        timerJob?.cancel()
+        _uiState.update { it.copy(timerMode = mode, timerCountdownSeconds = null) }
+    }
+
     fun toggleTimer() {
         val next = when (_uiState.value.timerMode) {
-            TimerMode.OFF -> TimerMode.SEC_3
-            TimerMode.SEC_3 -> TimerMode.SEC_5
+            TimerMode.OFF -> TimerMode.SEC_1
+            TimerMode.SEC_1 -> TimerMode.SEC_2
+            TimerMode.SEC_2 -> TimerMode.SEC_5
             TimerMode.SEC_5 -> TimerMode.SEC_10
             TimerMode.SEC_10 -> TimerMode.OFF
         }
-        _uiState.update { it.copy(timerMode = next) }
+        setTimerMode(next)
     }
 
     fun toggleGrid() {
@@ -513,8 +519,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun openGallery() {
+        timerJob?.cancel()
         if (_uiState.value.recentPhotos.isNotEmpty() || _uiState.value.lastCapturedPhoto != null) {
-            _uiState.update { it.copy(isGalleryVisible = true) }
+            _uiState.update { it.copy(isGalleryVisible = true, timerCountdownSeconds = null) }
+        } else if (_uiState.value.timerCountdownSeconds != null) {
+            _uiState.update { it.copy(timerCountdownSeconds = null) }
         }
     }
 
@@ -955,8 +964,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopCamera() {
+        timerJob?.cancel()
         cameraController.closeCamera()
-        _uiState.update { it.copy(isCameraReady = false) }
+        _uiState.update { it.copy(isCameraReady = false, timerCountdownSeconds = null) }
     }
 
     fun toggleShutterLimit(nanos: Long) {
@@ -1077,6 +1087,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         val timer = _uiState.value.timerMode.seconds
         if (timer > 0) {
+            if (_uiState.value.timerCountdownSeconds != null) {
+                timerJob?.cancel()
+                _uiState.update { it.copy(timerCountdownSeconds = null) }
+                return
+            }
             timerJob?.cancel()
             timerJob = viewModelScope.launch {
                 for (s in timer downTo 1) {

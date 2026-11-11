@@ -170,6 +170,38 @@ fun CameraScreen(
 
         val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
 
+        // Subtle single haptic when horizon level aligns (with hysteresis to avoid micro-jitter repeats)
+        var hasSignaledHorizonLevel by remember { mutableStateOf(false) }
+        var lastHorizonHapticTime by remember { mutableStateOf(0L) }
+        LaunchedEffect(
+            uiState.horizon,
+            uiState.isHorizonLevelVisible,
+            uiState.isGalleryVisible,
+            uiState.uiHapticsMode,
+            isAnyPopupOpen
+        ) {
+            if (!uiState.isHorizonLevelVisible || uiState.isGalleryVisible || isAnyPopupOpen) {
+                hasSignaledHorizonLevel = false
+                return@LaunchedEffect
+            }
+            val h = uiState.horizon
+            if (h.isLevel && !hasSignaledHorizonLevel) {
+                val now = System.currentTimeMillis()
+                if (now - lastHorizonHapticTime >= 800L) {
+                    if (uiState.uiHapticsMode == "VIBRATE") {
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                    lastHorizonHapticTime = now
+                }
+                hasSignaledHorizonLevel = true
+            } else if (
+                hasSignaledHorizonLevel &&
+                (kotlin.math.abs(h.rollDegrees) > 3.5f || kotlin.math.abs(h.pitchDegrees) > 4.0f)
+            ) {
+                hasSignaledHorizonLevel = false
+            }
+        }
+
         // ==========================================
         // MAIN VIEWPORT STRUCTURE (Never blurred!)
         // ==========================================
@@ -551,6 +583,7 @@ fun CameraScreen(
                 }
             },
             onCycleNoiseReduction = { viewModel.cycleNoiseReduction() },
+            onSelectTimerMode = { viewModel.setTimerMode(it) },
             onCycleSharpness = { viewModel.cycleSharpness() },
             onToggleHistogram = { viewModel.toggleHistogram() },
             onToggleHorizon = { viewModel.toggleHorizon() },
@@ -745,6 +778,9 @@ private fun ViewfinderPreviewContent(
 
     LaunchedEffect(uiState.shutterBlinkTrigger) {
         if (uiState.shutterBlinkTrigger > 0L) {
+            if (uiState.cameraSoundMode == "VIBRATE") {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            }
             shutterCurtainAlpha.snapTo(0f)
             shutterCurtainAlpha.animateTo(
                 targetValue = 0.92f,
@@ -754,6 +790,12 @@ private fun ViewfinderPreviewContent(
                 targetValue = 0f,
                 animationSpec = tween(durationMillis = 35, easing = FastOutSlowInEasing)
             )
+        }
+    }
+
+    LaunchedEffect(uiState.timerCountdownSeconds) {
+        if (uiState.timerCountdownSeconds != null && uiState.uiHapticsMode == "VIBRATE") {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         }
     }
 
@@ -998,6 +1040,44 @@ private fun ViewfinderPreviewContent(
             }
         }
 
+        // Self-Timer Countdown Overlay (Nothing OS Monospace)
+        val countdownSec = uiState.timerCountdownSeconds
+        if (countdownSec != null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .rotateBounds(animatedRotation)
+                    .clip(shape)
+                    .background(Color(0xB809090B))
+                    .border(1.dp, Color(0xFF27272A), shape)
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "TIMER // ${uiState.timerMode.label}",
+                    color = Color(0xFFE11D48),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = countdownSec.toString(),
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 54.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "TAP SHUTTER TO CANCEL",
+                    color = Color(0xFFA1A1AA),
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
         // Mechanical shutter curtain blackout animation (~60ms total)
         if (shutterCurtainAlpha.value > 0f) {
             Box(
@@ -1174,25 +1254,27 @@ private fun BottomControlsContent(
                             if (uiState.isCapturing || uiState.isLongExposing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
                             CircleShape
                         )
-                        .pointerInput(uiState.isLongExposing) {
+                        .pointerInput(uiState.isLongExposing, uiState.timerMode, uiState.timerCountdownSeconds) {
                             detectTapGestures(
                                 onPress = {
                                     if (uiState.isLongExposing) return@detectTapGestures
+                                    val isTimerActive = uiState.timerMode != TimerMode.OFF || uiState.timerCountdownSeconds != null
                                     var isHolding = true
                                     val startTime = System.currentTimeMillis()
                                     var burstJob: Job? = null
 
-                                    burstJob = coroutineScope.launch {
-                                        delay(500)
-                                        if (isHolding) {
-                                            isBursting = true
-                                            burstCount = 0
-                                            while (isHolding) {
-                                                burstCount++
-                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                onBurstCapture()
-                                                val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(100L, 500L)
-                                                delay(exposureMs)
+                                    if (!isTimerActive) {
+                                        burstJob = coroutineScope.launch {
+                                            delay(500)
+                                            if (isHolding) {
+                                                isBursting = true
+                                                burstCount = 0
+                                                while (isHolding) {
+                                                    burstCount++
+                                                    onBurstCapture()
+                                                    val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(100L, 500L)
+                                                    delay(exposureMs)
+                                                }
                                             }
                                         }
                                     }
@@ -1200,9 +1282,9 @@ private fun BottomControlsContent(
                                     tryAwaitRelease()
                                     isHolding = false
                                     val duration = System.currentTimeMillis() - startTime
-                                    burstJob.cancel()
+                                    burstJob?.cancel()
 
-                                    if (!isBursting && duration < 500) {
+                                    if (!isBursting && (isTimerActive || duration < 500)) {
                                         onCapture()
                                     }
 
@@ -1218,6 +1300,22 @@ private fun BottomControlsContent(
                             color = Color(0xFFE11D48),
                             strokeWidth = 3.dp,
                             modifier = Modifier.size(28.dp)
+                        )
+                    } else if (uiState.timerCountdownSeconds != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFFE11D48))
+                        )
+                    } else if (uiState.timerMode != TimerMode.OFF) {
+                        Text(
+                            text = uiState.timerMode.label,
+                            color = Color(0xFFE11D48),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.rotate(animatedRotation)
                         )
                     } else {
                         val dotScale by animateFloatAsState(

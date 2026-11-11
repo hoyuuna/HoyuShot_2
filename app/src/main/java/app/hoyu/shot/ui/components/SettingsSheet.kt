@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.CameraUiState
 import app.hoyu.shot.model.NoiseReductionMode
 import app.hoyu.shot.model.SharpnessMode
+import app.hoyu.shot.model.TimerMode
 
 @Composable
 fun SettingsDialog(
@@ -38,6 +39,7 @@ fun SettingsDialog(
     rotationDegrees: Float = 0f,
     onToggleResumeSettings: () -> Unit,
     onToggleGeotagging: () -> Unit,
+    onSelectTimerMode: (TimerMode) -> Unit,
     onCycleNoiseReduction: () -> Unit,
     onCycleSharpness: () -> Unit,
     onToggleHistogram: () -> Unit,
@@ -296,7 +298,72 @@ fun SettingsDialog(
                     }
                 }
 
-                // 3. Pro Viewfinder Aids Toggles (HORIZON, PEAKING, ZEBRA)
+                // 3. Self-Timer Delay (OFF - 1S - 2S - 5S - 10S)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF18181B))
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "SELF TIMER // DELAY",
+                            color = if (uiState.timerMode != TimerMode.OFF) Color(0xFFFF4D6D) else Color(0xFF71717A),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = uiState.timerMode.label,
+                            color = if (uiState.timerMode != TimerMode.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TimerMode.entries.forEach { mode ->
+                            val isSelected = uiState.timerMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(shape)
+                                    .background(if (isSelected) Color(0x33E11D48) else Color(0xFF09090B))
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                        shape
+                                    )
+                                    .clickable {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        onSelectTimerMode(mode)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = mode.label,
+                                    color = if (isSelected) Color(0xFFFAFAFA) else Color(0xFF71717A),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 4. Pro Viewfinder Aids Toggles (HISTOGRAM, HORIZON, PEAKING, ZEBRA)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
