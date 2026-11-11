@@ -648,6 +648,7 @@ fun CameraScreen(
             onTogglePreReleaseUpdate = { viewModel.togglePreReleaseUpdate() },
             onToggleTeleZoomFallback = { viewModel.toggleTeleZoomFallback() },
             onToggleExifSoftwareTag = { viewModel.toggleExifSoftwareTag() },
+            onToggleHqViewport = { viewModel.toggleHqViewport() },
             onDismiss = {
                 isAdvancedSettingsVisible = false
                 scrollToUpdates = false

@@ -52,11 +52,11 @@ data class HardwareCapabilities(
 
         val pool = if (matchingSizes.isNotEmpty()) matchingSizes else supportedPreviewSizes
 
-        // Prefer resolution around 1080p - 1440p for crisp, lag-free preview
+        // Prefer resolution up to maxDimension; if none fit (small-screen fast fallback), pick smallest available
         return pool.filter { (w, _) -> w <= maxDimension }
             .maxByOrNull { (w, h) -> w * h }
-            ?: pool.maxByOrNull { (w, h) -> w * h }
-            ?: Pair(1920, 1080)
+            ?: pool.minByOrNull { (w, h) -> w * h }
+            ?: Pair(1280, 720)
     }
 
     companion object {

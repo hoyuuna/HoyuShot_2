@@ -12,9 +12,14 @@ class AutoFitSurfaceView @JvmOverloads constructor(
 ) : SurfaceView(context, attrs, defStyle) {
 
     private var aspectRatio = 0f
+    private var lastFixedWidth = 0
+    private var lastFixedHeight = 0
 
     fun setAspectRatio(width: Int, height: Int) {
         require(width > 0 && height > 0) { "Dimensions must be positive" }
+        if (lastFixedWidth == width && lastFixedHeight == height) return
+        lastFixedWidth = width
+        lastFixedHeight = height
         aspectRatio = width.toFloat() / height.toFloat()
         holder.setFixedSize(width, height)
         requestLayout()

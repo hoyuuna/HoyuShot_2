@@ -172,4 +172,8 @@ class SettingsRepository(context: Context) {
     var isExifSoftwareTagEnabled: Boolean
         get() = prefs.getBoolean("adv_exif_software_tag", true)
         set(value) = prefs.edit().putBoolean("adv_exif_software_tag", value).apply()
+
+    var isHqViewportEnabled: Boolean
+        get() = prefs.getBoolean("adv_hq_viewport", true)
+        set(value) = prefs.edit().putBoolean("adv_hq_viewport", value).apply()
 }

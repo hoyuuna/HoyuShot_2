@@ -54,6 +54,7 @@ fun AdvancedSettingsDialog(
     onTogglePreReleaseUpdate: () -> Unit,
     onToggleTeleZoomFallback: () -> Unit = {},
     onToggleExifSoftwareTag: () -> Unit = {},
+    onToggleHqViewport: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -448,6 +449,14 @@ fun AdvancedSettingsDialog(
                         }
                     }
                 }
+
+                // HQ Viewport Toggle
+                SettingsToggleRow(
+                    title = "HQ VIEWPORT",
+                    subtitle = if (uiState.isHqViewportEnabled) "Sharp high-res viewfinder (light NR/edge); photo capture keeps full quality" else "Zero-latency raw preview (lower res, NR/edge OFF on viewfinder only)",
+                    isActive = uiState.isHqViewportEnabled,
+                    onToggle = onToggleHqViewport
+                )
 
                 // Interface Blur Toggle
                 SettingsToggleRow(

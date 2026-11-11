@@ -47,6 +47,8 @@ class Camera2Controller(
 
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
+    private var analysisThread: HandlerThread? = null
+    private var analysisHandler: Handler? = null
 
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
@@ -83,9 +85,12 @@ class Camera2Controller(
     var onCaptureError: ((String) -> Unit)? = null
     var onOverlayDataReady: ((ViewfinderOverlayData) -> Unit)? = null
     var onBlurredBackdropReady: ((androidx.compose.ui.graphics.ImageBitmap) -> Unit)? = null
+    @Volatile var isHistogramOverlayEnabled: Boolean = false
     @Volatile var isPeakingOverlayEnabled: Boolean = false
     @Volatile var isZebraOverlayEnabled: Boolean = false
     @Volatile var isBlurBackdropNeeded: Boolean = false
+    @Volatile var isHqViewportEnabled: Boolean = true
+    private var isAnalysisTargetAttached: Boolean = false
     private var lastBackdropGeneratedMs: Long = 0L
     var captureFormat: CaptureFormat = CaptureFormat.JPEG
         set(value) {
@@ -181,6 +186,12 @@ class Camera2Controller(
                 backgroundHandler = Handler(looper)
             }
         }
+        if (analysisThread == null) {
+            analysisThread = HandlerThread("CameraAnalysisThread").apply {
+                start()
+                analysisHandler = Handler(looper)
+            }
+        }
     }
 
     fun stopBackgroundThread() {
@@ -191,6 +202,33 @@ class Camera2Controller(
             backgroundHandler = null
         } catch (e: InterruptedException) {
             Log.e(TAG, "Error stopping background thread", e)
+        }
+        analysisThread?.quitSafely()
+        try {
+            analysisThread?.join()
+            analysisThread = null
+            analysisHandler = null
+        } catch (e: InterruptedException) {
+            Log.e(TAG, "Error stopping analysis thread", e)
+        }
+    }
+
+    private fun needsAnalysisStream(): Boolean {
+        val needClamp = !isAeLocked && isExposureClamped &&
+            (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
+        return isHistogramOverlayEnabled ||
+            isPeakingOverlayEnabled ||
+            isZebraOverlayEnabled ||
+            isBlurBackdropNeeded ||
+            needClamp
+    }
+
+    fun refreshAnalysisStream() {
+        val handler = backgroundHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { applyAllSettingsInternal() }
+        } else {
+            applyAllSettingsInternal()
         }
     }
 
@@ -212,7 +250,9 @@ class Camera2Controller(
             val caps = hardwareInspector.inspectCamera(cameraId)
             _capabilities.value = caps
 
-            val optimalPreviewSize = caps?.findOptimalPreviewSize(targetRatio) ?: Pair(1920, 1080)
+            val maxPreviewDim = if (isHqViewportEnabled) 1920 else 960
+            val optimalPreviewSize = caps?.findOptimalPreviewSize(targetRatio, maxDimension = maxPreviewDim)
+                ?: Pair(1280, 720)
             onPreviewSizeCalculated(optimalPreviewSize.first, optimalPreviewSize.second)
 
             setupImageReaders(chars, targetRatio)
@@ -361,7 +401,7 @@ class Camera2Controller(
     private fun setupImageReaders(chars: CameraCharacteristics, targetRatio: AspectRatio) {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
 
-        // 1. Fast Analysis stream
+        // 1. Fast Analysis stream (dedicated thread + zero-copy skip when unused)
         val yuvSizes = map.getOutputSizes(ImageFormat.YUV_420_888)
         val optimalYuv = yuvSizes?.minByOrNull { it.width * it.height } ?: yuvSizes?.firstOrNull()
         if (optimalYuv != null) {
@@ -372,16 +412,44 @@ class Camera2Controller(
                     val image = reader.acquireLatestImage()
                     if (image != null) {
                         try {
-                            val hist = histogramAnalyzer.analyze(image)
+                            val needClampCheck = !isAeLocked && isExposureClamped &&
+                                (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
+                            val needOverlays = isPeakingOverlayEnabled || isZebraOverlayEnabled
+                            val needBlur = isBlurBackdropNeeded
+
+                            if (!isHistogramOverlayEnabled && !needClampCheck && !needOverlays && !needBlur) {
+                                return@setOnImageAvailableListener
+                            }
+
                             val nowMs = System.currentTimeMillis()
-                            lastHistogramFrameMs = nowMs
-                            onHistogramReady(hist)
+                            val clampTick = if (needClampCheck) {
+                                lumaCheckCounter++
+                                if (lumaCheckCounter >= 3) {
+                                    lumaCheckCounter = 0
+                                    true
+                                } else false
+                            } else false
+                            val shouldAnalyzeHist = clampTick || (isHistogramOverlayEnabled && nowMs - lastHistogramFrameMs >= 80L)
+                            if (shouldAnalyzeHist) {
+                                val hist = histogramAnalyzer.analyze(image)
+                                lastHistogramFrameMs = nowMs
+                                if (isHistogramOverlayEnabled) {
+                                    onHistogramReady(hist)
+                                }
+                                if (clampTick) {
+                                    backgroundHandler?.post {
+                                        if (isExposureClamped) {
+                                            adjustClampedExposure(hist)
+                                        }
+                                    }
+                                }
+                            }
 
                             val cChars = currentCharacteristics
                             val sensorOrient = cChars?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                             val isFront = cChars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
 
-                            if (isPeakingOverlayEnabled || isZebraOverlayEnabled) {
+                            if (needOverlays) {
                                 val overlay = histogramAnalyzer.analyzeOverlays(
                                     image = image,
                                     sensorOrientation = sensorOrient,
@@ -392,7 +460,7 @@ class Camera2Controller(
                                 onOverlayDataReady?.invoke(overlay)
                             }
 
-                            if (isBlurBackdropNeeded && nowMs - lastBackdropGeneratedMs >= 70L) {
+                            if (needBlur && nowMs - lastBackdropGeneratedMs >= 70L) {
                                 lastBackdropGeneratedMs = nowMs
                                 histogramAnalyzer.generateBlurredBackdrop(
                                     image = image,
@@ -402,21 +470,13 @@ class Camera2Controller(
                                     onBlurredBackdropReady?.invoke(bmp)
                                 }
                             }
-
-                            if (!isAeLocked && isExposureClamped && (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)) {
-                                lumaCheckCounter++
-                                if (lumaCheckCounter >= 3) {
-                                    lumaCheckCounter = 0
-                                    adjustClampedExposure(hist)
-                                }
-                            }
                         } catch (e: Exception) {
                             // ignore drop
                         } finally {
                             image.close()
                         }
                     }
-                }, backgroundHandler)
+                }, analysisHandler ?: backgroundHandler)
             }
         }
 
@@ -483,10 +543,14 @@ class Camera2Controller(
                 analysisImageReader?.surface?.let { add(it) }
             }
 
+            val attachAnalysis = needsAnalysisStream() && analysisImageReader != null
             previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(pSurface)
-                analysisImageReader?.surface?.let { addTarget(it) }
+                if (attachAnalysis) {
+                    analysisImageReader?.surface?.let { addTarget(it) }
+                }
             }
+            isAnalysisTargetAttached = attachAnalysis
 
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
@@ -509,6 +573,7 @@ class Camera2Controller(
                         previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(pSurface)
                         }
+                        isAnalysisTargetAttached = false
                         device.createCaptureSession(fallbackSurfaces, object : CameraCaptureSession.StateCallback() {
                             override fun onConfigured(fbSession: CameraCaptureSession) {
                                 captureSession = fbSession
@@ -1047,21 +1112,41 @@ class Camera2Controller(
                 }
             }
 
-            // 7. Noise Reduction
-            when (currentNoiseReduction) {
-                NoiseReductionMode.OFF -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
-                NoiseReductionMode.FAST -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
-                NoiseReductionMode.HIGH_QUALITY -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+            // 7. Preview Noise Reduction & Sharpness (prioritize zero-latency preview; full quality applies at capture)
+            val previewNr = if (isHqViewportEnabled) {
+                if (currentNoiseReduction == NoiseReductionMode.OFF) NoiseReductionMode.OFF else NoiseReductionMode.FAST
+            } else {
+                NoiseReductionMode.OFF
+            }
+            val previewSharp = if (isHqViewportEnabled) {
+                if (currentSharpness == SharpnessMode.OFF) SharpnessMode.OFF else SharpnessMode.NORMAL
+            } else {
+                SharpnessMode.OFF
+            }
+            applyNoiseAndEdgeModes(builder, chars, previewNr, previewSharp, isPreview = true)
+
+            // 8. Target FPS Range for fluid viewfinder pacing (relaxed if shutter > 1/30s)
+            val activePreviewShutter = when {
+                currentExposureMode == ExposureMode.MANUAL || currentExposureMode == ExposureMode.SHUTTER_PRIORITY -> validShutter
+                isExposureClamped -> currentClampedShutter
+                else -> 0L
+            }
+            selectPreviewFpsRange(chars, activePreviewShutter)?.let { fpsRange ->
+                builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
             }
 
-            // 8. Edge Mode (Sharpness)
-            when (currentSharpness) {
-                SharpnessMode.OFF -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
-                SharpnessMode.NORMAL -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
-                SharpnessMode.HIGH -> builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+            // 9. Dynamically attach/detach CPU analysis stream only when Histogram / Peaking / Zebra / Blur / Clamp needs it
+            val analysisSurface = analysisImageReader?.surface
+            val shouldAttachAnalysis = analysisSurface != null && needsAnalysisStream()
+            if (shouldAttachAnalysis && !isAnalysisTargetAttached) {
+                builder.addTarget(analysisSurface!!)
+                isAnalysisTargetAttached = true
+            } else if (!shouldAttachAnalysis && isAnalysisTargetAttached && analysisSurface != null) {
+                builder.removeTarget(analysisSurface)
+                isAnalysisTargetAttached = false
             }
 
-            // 9. Spot AE & AF Metering Regions
+            // 10. Spot AE & AF Metering Regions
             if (currentAeMeteringRect != null) {
                 builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(currentAeMeteringRect))
             }
@@ -1069,7 +1154,7 @@ class Camera2Controller(
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(currentAfMeteringRect))
             }
 
-            // 10. Antibanding Mode
+            // 11. Antibanding Mode
             val abMode = when (antibandingMode) {
                 "OFF" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
                 "50HZ" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
@@ -1082,6 +1167,73 @@ class Camera2Controller(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply camera settings", e)
         }
+    }
+
+    private fun selectPreviewFpsRange(chars: CameraCharacteristics, forcedShutterNanos: Long): android.util.Range<Int>? {
+        val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
+        val standardRanges = ranges.filter { it.lower > 0 && it.upper in 15..60 }
+        if (standardRanges.isEmpty()) return null
+
+        // When user locks a shutter slower than ~1/30s, use a range whose lower bound permits long exposures
+        if (forcedShutterNanos > 33_333_333L) {
+            return standardRanges
+                .filter { it.upper >= 24 }
+                .minWithOrNull(compareBy<android.util.Range<Int>> { it.lower }.thenByDescending { it.upper })
+                ?: standardRanges.minByOrNull { it.lower }
+        }
+
+        // Prefer 60fps peak with reasonable 15-30fps floor (keeps indoor exposure bright & daylight ultra-smooth)
+        val sixtyPeak = standardRanges.filter { it.upper >= 60 && it.lower in 15..30 }
+        if (sixtyPeak.isNotEmpty()) {
+            return sixtyPeak.maxWithOrNull(compareBy<android.util.Range<Int>> { it.lower }.thenBy { it.upper })
+        }
+
+        // Next prefer locked 30fps or highest minimum floor up to 30fps
+        return standardRanges.find { it.lower == 30 && it.upper == 30 }
+            ?: standardRanges
+                .filter { it.upper >= 30 && it.lower <= 30 }
+                .maxWithOrNull(compareBy<android.util.Range<Int>> { it.upper }.thenBy { it.lower })
+            ?: standardRanges.maxByOrNull { it.upper }
+    }
+
+    private fun applyNoiseAndEdgeModes(
+        builder: CaptureRequest.Builder,
+        chars: CameraCharacteristics,
+        nrMode: NoiseReductionMode,
+        sharpMode: SharpnessMode,
+        isPreview: Boolean
+    ) {
+        val availNr = chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES) ?: IntArray(0)
+        val desiredNr = when (nrMode) {
+            NoiseReductionMode.OFF -> when {
+                availNr.isEmpty() || availNr.contains(CaptureRequest.NOISE_REDUCTION_MODE_OFF) -> CaptureRequest.NOISE_REDUCTION_MODE_OFF
+                availNr.contains(CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL) -> CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+                else -> CaptureRequest.NOISE_REDUCTION_MODE_FAST
+            }
+            NoiseReductionMode.FAST -> CaptureRequest.NOISE_REDUCTION_MODE_FAST
+            NoiseReductionMode.HIGH_QUALITY -> if (!isPreview && (availNr.isEmpty() || availNr.contains(CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY))) {
+                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+            } else {
+                CaptureRequest.NOISE_REDUCTION_MODE_FAST
+            }
+        }
+        builder.set(CaptureRequest.NOISE_REDUCTION_MODE, desiredNr)
+
+        val availEdge = chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: IntArray(0)
+        val desiredEdge = when (sharpMode) {
+            SharpnessMode.OFF -> if (availEdge.isEmpty() || availEdge.contains(CaptureRequest.EDGE_MODE_OFF)) {
+                CaptureRequest.EDGE_MODE_OFF
+            } else {
+                CaptureRequest.EDGE_MODE_FAST
+            }
+            SharpnessMode.NORMAL -> CaptureRequest.EDGE_MODE_FAST
+            SharpnessMode.HIGH -> if (!isPreview && (availEdge.isEmpty() || availEdge.contains(CaptureRequest.EDGE_MODE_HIGH_QUALITY))) {
+                CaptureRequest.EDGE_MODE_HIGH_QUALITY
+            } else {
+                CaptureRequest.EDGE_MODE_FAST
+            }
+        }
+        builder.set(CaptureRequest.EDGE_MODE, desiredEdge)
     }
 
     private fun applyWhiteBalance(builder: CaptureRequest.Builder, preset: WhiteBalancePreset, kelvin: Int) {
@@ -1154,8 +1306,6 @@ class Camera2Controller(
                 captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, preview.get(CaptureRequest.CONTROL_AF_MODE))
                 captureBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, preview.get(CaptureRequest.LENS_FOCUS_DISTANCE))
                 captureBuilder.set(CaptureRequest.CONTROL_AWB_MODE, preview.get(CaptureRequest.CONTROL_AWB_MODE))
-                captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, preview.get(CaptureRequest.NOISE_REDUCTION_MODE))
-                captureBuilder.set(CaptureRequest.EDGE_MODE, preview.get(CaptureRequest.EDGE_MODE))
 
                 // Copy zoom
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1166,6 +1316,9 @@ class Camera2Controller(
                     if (crop != null) captureBuilder.set(CaptureRequest.SCALER_CROP_REGION, crop)
                 }
             }
+
+            // Apply full photo-capture Noise Reduction & Sharpness regardless of viewport latency mode
+            applyNoiseAndEdgeModes(captureBuilder, chars, currentNoiseReduction, currentSharpness, isPreview = false)
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
 
@@ -1695,6 +1848,7 @@ class Camera2Controller(
     fun closeCamera() {
         clearPendingRawBuffers()
         isRawStreamConfigured = false
+        isAnalysisTargetAttached = false
         isCapturing = false
         isExposureClamped = false
         forceHardwareAeOnce = false

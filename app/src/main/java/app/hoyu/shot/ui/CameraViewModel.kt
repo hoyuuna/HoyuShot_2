@@ -225,11 +225,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.captureFormat = initFormat
         cameraController.isPeakingOverlayEnabled = initPeaking
         cameraController.isZebraOverlayEnabled = initZebra
+        cameraController.isHistogramOverlayEnabled = initHist
         cameraController.jpegQuality = settingsRepo.jpegQuality
         cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
         cameraController.antibandingMode = settingsRepo.antibandingMode
         cameraController.cameraSoundMode = settingsRepo.cameraSoundMode
         cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
+        cameraController.isHqViewportEnabled = settingsRepo.isHqViewportEnabled
 
         _uiState.update {
             it.copy(
@@ -278,7 +280,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isAutoUpdateCheckEnabled = settingsRepo.isAutoUpdateCheckEnabled,
                 isPreReleaseUpdateEnabled = settingsRepo.isPreReleaseUpdateEnabled,
                 isTeleZoomFallbackEnabled = settingsRepo.isTeleZoomFallbackEnabled,
-                isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
+                isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled,
+                isHqViewportEnabled = settingsRepo.isHqViewportEnabled
             )
         }
 
@@ -500,6 +503,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleHistogram() {
         val next = !_uiState.value.isHistogramVisible
         _uiState.update { it.copy(isHistogramVisible = next) }
+        cameraController.isHistogramOverlayEnabled = next
+        cameraController.refreshAnalysisStream()
         settingsRepo.savedHistogramVisible = next
     }
 
@@ -513,6 +518,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val next = !_uiState.value.isFocusPeakingEnabled
         _uiState.update { it.copy(isFocusPeakingEnabled = next) }
         cameraController.isPeakingOverlayEnabled = next
+        cameraController.refreshAnalysisStream()
         settingsRepo.savedPeakingEnabled = next
     }
 
@@ -520,11 +526,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val next = !_uiState.value.isZebraStripesEnabled
         _uiState.update { it.copy(isZebraStripesEnabled = next) }
         cameraController.isZebraOverlayEnabled = next
+        cameraController.refreshAnalysisStream()
         settingsRepo.savedZebraEnabled = next
     }
 
     fun setPopupBackdropBlurActive(active: Boolean) {
+        val changed = cameraController.isBlurBackdropNeeded != active
         cameraController.isBlurBackdropNeeded = active
+        if (changed) {
+            cameraController.refreshAnalysisStream()
+        }
         if (!active && _uiState.value.blurredBackdrop != null) {
             _uiState.update { it.copy(blurredBackdrop = null) }
         }
@@ -1022,6 +1033,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(isExifSoftwareTagEnabled = next) }
         settingsRepo.isExifSoftwareTagEnabled = next
         cameraController.isExifSoftwareTagEnabled = next
+    }
+
+    fun toggleHqViewport() {
+        val next = !_uiState.value.isHqViewportEnabled
+        _uiState.update { it.copy(isHqViewportEnabled = next) }
+        settingsRepo.isHqViewportEnabled = next
+        cameraController.isHqViewportEnabled = next
+        val surface = activeSurface
+        if (surface != null) {
+            cameraController.switchCamera(_uiState.value.currentCameraId, surface, _uiState.value.aspectRatio) { w, h ->
+                _uiState.update { it.copy(previewSize = Pair(w, h)) }
+            }
+        }
     }
 
     fun toggleCameraFacing() {
