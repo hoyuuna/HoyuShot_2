@@ -109,7 +109,7 @@ class Camera2Controller(
         var receivedCount: Int = 0
     )
     private val hdrLock = Any()
-    private val pendingHdrBursts = ArrayDeque<HdrBurstBuffer>()
+    private val pendingHdrBursts = mutableListOf<HdrBurstBuffer>()
     private var nextHdrBurstId: Long = 1L
     // Dedicated worker pool for HDR fusion / NaturalColorProcessor / JPEG EXIF saving
     // so CameraBackgroundThread stays free for zero-lag shutter & ImageReader callbacks.
@@ -586,7 +586,7 @@ class Camera2Controller(
                             burst.receivedCount++
                             consumedByHdr = true
                             if (burst.receivedCount == 3) {
-                                pendingHdrBursts.removeFirst()
+                                pendingHdrBursts.removeAt(0)
                                 hdrCompleteTriple = Triple(
                                     burst.frames[0]!!,
                                     burst.frames[1]!!,
@@ -1732,7 +1732,7 @@ class Camera2Controller(
             if (useHdrBurst) {
                 val burstId = synchronized(hdrLock) {
                     val id = nextHdrBurstId++
-                    pendingHdrBursts.addLast(HdrBurstBuffer(id))
+                    pendingHdrBursts.add(HdrBurstBuffer(id))
                     id
                 }
                 currentHdrBurstId = burstId
