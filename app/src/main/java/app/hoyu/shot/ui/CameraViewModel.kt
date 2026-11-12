@@ -111,6 +111,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        cameraController.onPendingPostProcessCountChanged = { count ->
+            _uiState.update { it.copy(pendingPostProcessCount = count) }
+        }
+
         cameraController.onLongExposureStateChanged = { isLong ->
             viewModelScope.launch {
                 _uiState.update { it.copy(isLongExposing = isLong) }
@@ -269,6 +273,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val initColorProfile = runCatching {
             ColorProfile.valueOf(settingsRepo.savedColorProfile)
         }.getOrDefault(ColorProfile.NATURAL)
+        val initHdrEnabled = settingsRepo.savedHdrEnabled
         val initCustomPresets = settingsRepo.loadCustomPresets()
         val initActiveCustomId = if (isResume) {
             settingsRepo.savedActiveCustomPresetId?.takeIf { id -> initCustomPresets.any { it.id == id } }
@@ -280,6 +285,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         cameraController.colorProfile = initColorProfile
+        cameraController.isHdrEnabled = initHdrEnabled
         cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
         cameraController.isHqViewportEnabled = settingsRepo.isHqViewportEnabled
 
@@ -335,7 +341,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isHqViewportEnabled = settingsRepo.isHqViewportEnabled,
                 customPresets = initCustomPresets,
                 activeCustomPresetId = initActiveCustomId,
-                colorProfile = initColorProfile
+                colorProfile = initColorProfile,
+                isHdrEnabled = initHdrEnabled
             )
         }
 
@@ -1261,6 +1268,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.colorProfile = profile
     }
 
+    fun toggleHdr() {
+        detachCustomPresetOnUserEdit()
+        val next = !_uiState.value.isHdrEnabled
+        _uiState.update { it.copy(isHdrEnabled = next) }
+        settingsRepo.savedHdrEnabled = next
+        cameraController.isHdrEnabled = next
+    }
+
     private fun detachCustomPresetOnUserEdit() {
         if (_uiState.value.activeCustomPresetId != null) {
             _uiState.update { it.copy(activeCustomPresetId = null) }
@@ -1309,6 +1324,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             minShutterLimitNanos = state.minShutterLimitNanos,
             maxIsoLimit = state.maxIsoLimit,
             colorProfile = state.colorProfile,
+            isHdrEnabled = state.isHdrEnabled,
             createdAt = System.currentTimeMillis()
         )
         val updated = state.customPresets + preset
@@ -1382,6 +1398,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         cameraController.captureFormat = preset.captureFormat
         cameraController.colorProfile = preset.colorProfile
+        cameraController.isHdrEnabled = preset.isHdrEnabled
         sunCompassManager.isFrontCamera = targetLens.isFront
 
         _uiState.update {
@@ -1412,13 +1429,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 sharpnessMode = preset.sharpnessMode,
                 minShutterLimitNanos = clampedMinShutter,
                 maxIsoLimit = clampedMaxIso,
-                colorProfile = preset.colorProfile
+                colorProfile = preset.colorProfile,
+                isHdrEnabled = preset.isHdrEnabled
             )
         }
 
         settingsRepo.savedActiveCustomPresetId = preset.id
         settingsRepo.savedAspectRatio = preset.aspectRatio.name
         settingsRepo.savedColorProfile = preset.colorProfile.name
+        settingsRepo.savedHdrEnabled = preset.isHdrEnabled
         if (state.isResumeSettingsEnabled) {
             persistCurrentSettings()
         }

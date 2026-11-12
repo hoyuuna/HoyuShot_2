@@ -733,6 +733,7 @@ fun CameraScreen(
                     requestLocationFor("SUN_COMPASS") { viewModel.setSunCompassEnabled(true) }
                 }
             },
+            onToggleHdr = { viewModel.toggleHdr() },
             onOpenAdvancedSettings = {
                 isSettingsDialogVisible = false
                 isAdvancedSettingsVisible = true
@@ -1358,6 +1359,8 @@ private fun BottomControlsContent(
             QuickThumbnail(
                 photoInfo = uiState.lastCapturedPhoto,
                 rotationDegrees = animatedRotation,
+                isProcessing = uiState.pendingPostProcessCount > 0,
+                pendingCount = uiState.pendingPostProcessCount,
                 onClick = onOpenGallery
             )
 

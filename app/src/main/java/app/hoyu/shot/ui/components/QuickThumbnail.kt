@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +36,8 @@ import kotlinx.coroutines.withContext
 fun QuickThumbnail(
     photoInfo: CapturedPhotoInfo?,
     rotationDegrees: Float = 0f,
+    isProcessing: Boolean = false,
+    pendingCount: Int = 0,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -121,6 +124,33 @@ fun QuickThumbnail(
                     .size(24.dp)
                     .border(1.dp, Color(0xFF52525B), shape)
             )
+        }
+
+        if (isProcessing) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x8C09090B)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color(0xFFE11D48),
+                    strokeWidth = 2.dp
+                )
+                if (pendingCount > 1) {
+                    Text(
+                        text = "$pendingCount",
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(3.dp)
+                    )
+                }
+            }
         }
     }
 }

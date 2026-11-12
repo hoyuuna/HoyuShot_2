@@ -197,6 +197,10 @@ class SettingsRepository(context: Context) {
         get() = prefs.getString("saved_color_profile", ColorProfile.NATURAL.name) ?: ColorProfile.NATURAL.name
         set(value) = prefs.edit().putString("saved_color_profile", value).apply()
 
+    var savedHdrEnabled: Boolean
+        get() = prefs.getBoolean("saved_hdr_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_hdr_enabled", value).apply()
+
     var savedActiveCustomPresetId: String?
         get() = prefs.getString("saved_active_custom_preset_id", null)
         set(value) = if (value == null) {
@@ -258,6 +262,7 @@ class SettingsRepository(context: Context) {
                             colorProfile = runCatching {
                                 ColorProfile.valueOf(obj.optString("colorProfile"))
                             }.getOrDefault(ColorProfile.NATURAL),
+                            isHdrEnabled = obj.optBoolean("isHdrEnabled", false),
                             createdAt = obj.optLong("createdAt", 0L)
                         )
                     )
@@ -296,6 +301,7 @@ class SettingsRepository(context: Context) {
                 put("minShutterLimitNanos", preset.minShutterLimitNanos ?: JSONObject.NULL)
                 put("maxIsoLimit", preset.maxIsoLimit ?: JSONObject.NULL)
                 put("colorProfile", preset.colorProfile.name)
+                put("isHdrEnabled", preset.isHdrEnabled)
                 put("createdAt", preset.createdAt)
             }
             array.put(obj)

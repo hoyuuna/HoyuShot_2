@@ -112,5 +112,6 @@ data class CustomModePreset(
     val minShutterLimitNanos: Long? = null,
     val maxIsoLimit: Int? = null,
     val colorProfile: ColorProfile = ColorProfile.NATURAL,
+    val isHdrEnabled: Boolean = false,
     val createdAt: Long = 0L
 )

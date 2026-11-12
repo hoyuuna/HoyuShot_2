@@ -32,6 +32,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.Executors
 
 class Camera2Controller(
     private val context: Context,
@@ -100,6 +101,34 @@ class Camera2Controller(
     @Volatile var isBlurBackdropNeeded: Boolean = false
     @Volatile var isHqViewportEnabled: Boolean = true
     @Volatile var colorProfile: ColorProfile = ColorProfile.NATURAL
+    @Volatile var isHdrEnabled: Boolean = false
+
+    private data class HdrBurstBuffer(
+        val id: Long,
+        val frames: Array<ByteArray?> = arrayOfNulls(3),
+        var receivedCount: Int = 0
+    )
+    private val hdrLock = Any()
+    private val pendingHdrBursts = ArrayDeque<HdrBurstBuffer>()
+    private var nextHdrBurstId: Long = 1L
+    // Dedicated worker pool for HDR fusion / NaturalColorProcessor / JPEG EXIF saving
+    // so CameraBackgroundThread stays free for zero-lag shutter & ImageReader callbacks.
+    private val postProcessExecutor = Executors.newFixedThreadPool(2)
+    private val activePostProcessCount = java.util.concurrent.atomic.AtomicInteger(0)
+    var onPendingPostProcessCountChanged: ((Int) -> Unit)? = null
+
+    private fun enqueuePostProcess(task: () -> Unit) {
+        val count = activePostProcessCount.incrementAndGet()
+        onPendingPostProcessCountChanged?.invoke(count)
+        postProcessExecutor.execute {
+            try {
+                task()
+            } finally {
+                val remaining = activePostProcessCount.decrementAndGet().coerceAtLeast(0)
+                onPendingPostProcessCountChanged?.invoke(remaining)
+            }
+        }
+    }
     private var isAnalysisTargetAttached: Boolean = false
     private var lastBackdropGeneratedMs: Long = 0L
     var captureFormat: CaptureFormat = CaptureFormat.JPEG
@@ -533,7 +562,7 @@ class Camera2Controller(
         }
 
         jpegImageReader = ImageReader.newInstance(
-            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 4
+            chosenJpegSize.width, chosenJpegSize.height, ImageFormat.JPEG, 6
         ).apply {
             setOnImageAvailableListener({ reader ->
                 while (true) {
@@ -548,8 +577,34 @@ class Camera2Controller(
                     buffer.get(bytes)
                     image.close()
 
-                    backgroundHandler?.post {
-                        saveJpegBytes(bytes)
+                    var hdrCompleteTriple: Triple<ByteArray, ByteArray, ByteArray>? = null
+                    var consumedByHdr = false
+                    synchronized(hdrLock) {
+                        val burst = pendingHdrBursts.firstOrNull()
+                        if (burst != null && burst.receivedCount < 3) {
+                            burst.frames[burst.receivedCount] = bytes
+                            burst.receivedCount++
+                            consumedByHdr = true
+                            if (burst.receivedCount == 3) {
+                                pendingHdrBursts.removeFirst()
+                                hdrCompleteTriple = Triple(
+                                    burst.frames[0]!!,
+                                    burst.frames[1]!!,
+                                    burst.frames[2]!!
+                                )
+                            }
+                        }
+                    }
+
+                    if (hdrCompleteTriple != null) {
+                        val (refBytes, underBytes, overBytes) = hdrCompleteTriple!!
+                        enqueuePostProcess {
+                            saveJpegBytes(refBytes, hdrUnderBytes = underBytes, hdrOverBytes = overBytes)
+                        }
+                    } else if (!consumedByHdr) {
+                        enqueuePostProcess {
+                            saveJpegBytes(bytes)
+                        }
                     }
                 }
             }, backgroundHandler)
@@ -1582,7 +1637,10 @@ class Camera2Controller(
 
             lastCapturedIso = null
             lastCapturedExposureNanos = null
-            session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+
+            val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
+            var currentHdrBurstId = -1L
+            val captureCallback = object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
                     session: CameraCaptureSession,
                     request: CaptureRequest,
@@ -1590,7 +1648,7 @@ class Camera2Controller(
                     frameNumber: Long
                 ) {
                     super.onCaptureStarted(session, request, timestamp, frameNumber)
-                    if (!isLongExposure) {
+                    if (!isLongExposure && !useHdrBurst) {
                         // Release capture lock immediately as short exposure begins: zero shutter lag for rapid shooting
                         isCapturing = false
                         onExposureCompleted?.invoke()
@@ -1606,7 +1664,7 @@ class Camera2Controller(
                     result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { if (it > 0) lastCapturedIso = it }
                     result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { if (it > 0L) lastCapturedExposureNanos = it }
 
-                    if (willCaptureRaw) {
+                    if (willCaptureRaw && (!useHdrBurst || request.tag == "HDR_REF")) {
                         val ts = result.get(CaptureResult.SENSOR_TIMESTAMP)
                         if (ts != null) {
                             var matchedImage: android.media.Image? = null
@@ -1634,11 +1692,13 @@ class Camera2Controller(
                         }
                     }
 
-                    isCapturing = false
-                    if (isLongExposure) {
-                        onLongExposureStateChanged?.invoke(false)
+                    if (!useHdrBurst || request.tag == "HDR_OVER") {
+                        isCapturing = false
+                        if (isLongExposure) {
+                            onLongExposureStateChanged?.invoke(false)
+                        }
+                        onExposureCompleted?.invoke()
                     }
-                    onExposureCompleted?.invoke()
                 }
 
                 override fun onCaptureFailed(
@@ -1647,6 +1707,19 @@ class Camera2Controller(
                     failure: CaptureFailure
                 ) {
                     super.onCaptureFailed(session, request, failure)
+                    if (useHdrBurst && currentHdrBurstId >= 0L) {
+                        var refFallback: ByteArray? = null
+                        synchronized(hdrLock) {
+                            val idx = pendingHdrBursts.indexOfFirst { it.id == currentHdrBurstId }
+                            if (idx >= 0) {
+                                val burst = pendingHdrBursts.removeAt(idx)
+                                refFallback = burst.frames[0]
+                            }
+                        }
+                        refFallback?.let { fb ->
+                            enqueuePostProcess { saveJpegBytes(fb) }
+                        }
+                    }
                     isCapturing = false
                     if (isLongExposure) {
                         onLongExposureStateChanged?.invoke(false)
@@ -1654,7 +1727,40 @@ class Camera2Controller(
                     onExposureCompleted?.invoke()
                     onError("Capture failed: reason ${failure.reason}")
                 }
-            }, backgroundHandler)
+            }
+
+            if (useHdrBurst) {
+                val burstId = synchronized(hdrLock) {
+                    val id = nextHdrBurstId++
+                    pendingHdrBursts.addLast(HdrBurstBuffer(id))
+                    id
+                }
+                currentHdrBurstId = burstId
+                val burstRequests = buildHdrBurstRequests(
+                    device = device,
+                    chars = chars,
+                    baseBuilder = captureBuilder,
+                    willCaptureRaw = willCaptureRaw
+                )
+                backgroundHandler?.postDelayed({
+                    var timedOutRef: ByteArray? = null
+                    synchronized(hdrLock) {
+                        val idx = pendingHdrBursts.indexOfFirst { it.id == burstId }
+                        if (idx >= 0) {
+                            val b = pendingHdrBursts.removeAt(idx)
+                            timedOutRef = b.frames[0]
+                        }
+                    }
+                    if (timedOutRef != null) {
+                        enqueuePostProcess { saveJpegBytes(timedOutRef!!) }
+                        isCapturing = false
+                        onExposureCompleted?.invoke()
+                    }
+                }, 4500L)
+                session.captureBurst(burstRequests, captureCallback, backgroundHandler)
+            } else {
+                session.capture(captureBuilder.build(), captureCallback, backgroundHandler)
+            }
         } catch (e: Exception) {
             isCapturing = false
             onLongExposureStateChanged?.invoke(false)
@@ -1678,7 +1784,109 @@ class Camera2Controller(
         else -> 0f
     }
 
-    private fun saveJpegBytes(bytes: ByteArray) {
+    private fun buildHdrBurstRequests(
+        device: CameraDevice,
+        chars: CameraCharacteristics,
+        baseBuilder: CaptureRequest.Builder,
+        willCaptureRaw: Boolean
+    ): List<CaptureRequest> {
+        val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val shutterRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        val evRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+        val evStep = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
+
+        val aeMode = baseBuilder.get(CaptureRequest.CONTROL_AE_MODE) ?: CaptureRequest.CONTROL_AE_MODE_ON
+        val canLockManualExposure = isoRange != null && shutterRange != null &&
+            (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF || (lastMeasuredIso > 0 && lastMeasuredShutter > 0L))
+
+        val baseIso = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+            baseBuilder.get(CaptureRequest.SENSOR_SENSITIVITY) ?: lastMeasuredIso.coerceAtLeast(100)
+        } else {
+            lastMeasuredIso.coerceAtLeast(100)
+        }
+        val baseNanos = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+            baseBuilder.get(CaptureRequest.SENSOR_EXPOSURE_TIME) ?: lastMeasuredShutter.coerceAtLeast(1_000_000L)
+        } else {
+            lastMeasuredShutter.coerceAtLeast(1_000_000L)
+        }
+
+        val frameTags = listOf("HDR_REF", "HDR_UNDER", "HDR_OVER")
+        return frameTags.mapIndexed { idx, tag ->
+            val b = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            jpegImageReader?.surface?.let { b.addTarget(it) }
+            if (idx == 0 && willCaptureRaw) {
+                rawImageReader?.surface?.let { b.addTarget(it) }
+            }
+
+            // Copy common photographic settings from baseBuilder
+            b.set(CaptureRequest.CONTROL_AF_MODE, baseBuilder.get(CaptureRequest.CONTROL_AF_MODE))
+            b.set(CaptureRequest.LENS_FOCUS_DISTANCE, baseBuilder.get(CaptureRequest.LENS_FOCUS_DISTANCE))
+            b.set(CaptureRequest.CONTROL_AWB_MODE, baseBuilder.get(CaptureRequest.CONTROL_AWB_MODE))
+            baseBuilder.get(CaptureRequest.COLOR_CORRECTION_MODE)?.let { b.set(CaptureRequest.COLOR_CORRECTION_MODE, it) }
+            baseBuilder.get(CaptureRequest.COLOR_CORRECTION_GAINS)?.let { b.set(CaptureRequest.COLOR_CORRECTION_GAINS, it) }
+            baseBuilder.get(CaptureRequest.TONEMAP_MODE)?.let { b.set(CaptureRequest.TONEMAP_MODE, it) }
+            b.set(CaptureRequest.NOISE_REDUCTION_MODE, baseBuilder.get(CaptureRequest.NOISE_REDUCTION_MODE))
+            b.set(CaptureRequest.EDGE_MODE, baseBuilder.get(CaptureRequest.EDGE_MODE))
+            b.set(CaptureRequest.JPEG_QUALITY, baseBuilder.get(CaptureRequest.JPEG_QUALITY))
+            b.set(CaptureRequest.JPEG_ORIENTATION, baseBuilder.get(CaptureRequest.JPEG_ORIENTATION))
+            baseBuilder.get(CaptureRequest.JPEG_GPS_LOCATION)?.let { b.set(CaptureRequest.JPEG_GPS_LOCATION, it) }
+            baseBuilder.get(CaptureRequest.FLASH_MODE)?.let { b.set(CaptureRequest.FLASH_MODE, it) }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                baseBuilder.get(CaptureRequest.CONTROL_ZOOM_RATIO)?.let { b.set(CaptureRequest.CONTROL_ZOOM_RATIO, it) }
+            } else {
+                baseBuilder.get(CaptureRequest.SCALER_CROP_REGION)?.let { b.set(CaptureRequest.SCALER_CROP_REGION, it) }
+            }
+
+            if (canLockManualExposure && isoRange != null && shutterRange != null) {
+                b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                val (targetIso, targetNanos) = when (idx) {
+                    0 -> baseIso.coerceIn(isoRange.lower, isoRange.upper) to
+                        baseNanos.coerceIn(shutterRange.lower, shutterRange.upper)
+                    1 -> {
+                        // -2 EV: prioritize 4x faster shutter to freeze motion & highlights
+                        val underNanos = (baseNanos / 4L).coerceIn(shutterRange.lower, shutterRange.upper)
+                        val ratioAchieved = baseNanos.toDouble() / underNanos.coerceAtLeast(1L).toDouble()
+                        val extraDiv = (4.0 / ratioAchieved).coerceAtLeast(1.0)
+                        val underIso = (baseIso / extraDiv).toInt().coerceIn(isoRange.lower, isoRange.upper)
+                        underIso to underNanos
+                    }
+                    else -> {
+                        // +2 EV: cap handheld shutter at 250ms, make up remaining EV with ISO
+                        val maxHandheldShutter = minOf(shutterRange.upper, 250_000_000L).coerceAtLeast(shutterRange.lower)
+                        val overNanos = (baseNanos * 4L).coerceIn(shutterRange.lower, maxHandheldShutter)
+                        val ratioAchieved = overNanos.toDouble() / baseNanos.coerceAtLeast(1L).toDouble()
+                        val extraGain = (4.0 / ratioAchieved).coerceAtLeast(1.0)
+                        val overIso = (baseIso * extraGain).toInt().coerceIn(isoRange.lower, isoRange.upper)
+                        overIso to overNanos
+                    }
+                }
+                b.set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
+                b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetNanos)
+            } else {
+                b.set(CaptureRequest.CONTROL_AE_MODE, aeMode)
+                if (evRange != null) {
+                    val baseEv = baseBuilder.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION) ?: 0
+                    val deltaSteps = (2.0f / evStep.coerceAtLeast(0.1f)).toInt().coerceAtLeast(1)
+                    val targetEv = when (idx) {
+                        0 -> baseEv
+                        1 -> (baseEv - deltaSteps).coerceIn(evRange.lower, evRange.upper)
+                        else -> (baseEv + deltaSteps).coerceIn(evRange.lower, evRange.upper)
+                    }
+                    b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, targetEv)
+                }
+            }
+
+            b.setTag(tag)
+            b.build()
+        }
+    }
+
+    private fun saveJpegBytes(
+        bytes: ByteArray,
+        hdrUnderBytes: ByteArray? = null,
+        hdrOverBytes: ByteArray? = null
+    ) {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val count = photoCounter.incrementAndGet() % 10000
         val fileName = "IMG_${timeStamp}_${String.format(Locale.US, "%04d", count)}.jpg"
@@ -1687,9 +1895,10 @@ class Camera2Controller(
         val isFrontCam = currentCharacteristics?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
         val shouldMirror = isFrontCam && isMirrorSelfie
         val shouldApplyColor = colorProfile != ColorProfile.OFF
+        val shouldApplyHdr = hdrUnderBytes != null && hdrOverBytes != null
         var wasReencodedUpright = false
         var preservedExifOrientation = ExifInterface.ORIENTATION_UNDEFINED
-        val finalBytes = if (shouldMirror || shouldApplyColor) {
+        val finalBytes = if (shouldMirror || shouldApplyColor || shouldApplyHdr) {
             try {
                 val rawExifOrientation = try {
                     ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
@@ -1706,6 +1915,9 @@ class Camera2Controller(
                 }
                 val origBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
                 if (origBitmap != null) {
+                    if (shouldApplyHdr) {
+                        HdrProcessor.mergeHdrInPlace(origBitmap, hdrUnderBytes!!, hdrOverBytes!!)
+                    }
                     if (shouldApplyColor) {
                         NaturalColorProcessor.processBitmapInPlace(origBitmap, colorProfile)
                     }

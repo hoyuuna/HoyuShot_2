@@ -178,7 +178,13 @@ data class CameraUiState(
     val activeCustomPresetId: String? = null,
 
     // Natural Color Engine Profile for JPEG output
-    val colorProfile: ColorProfile = ColorProfile.NATURAL
+    val colorProfile: ColorProfile = ColorProfile.NATURAL,
+
+    // 3-Frame AEB HDR Bracketing (defaults OFF)
+    val isHdrEnabled: Boolean = false,
+
+    // Non-blocking background HDR / JPEG post-processing counter
+    val pendingPostProcessCount: Int = 0
 )
 
 enum class DialParameter {
