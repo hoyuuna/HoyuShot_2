@@ -493,13 +493,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun toggleResumeSettings() {
-        val next = !settingsRepo.isResumeSettingsEnabled
-        settingsRepo.isResumeSettingsEnabled = next
-        _uiState.update { it.copy(isResumeSettingsEnabled = next) }
-        if (next) persistCurrentSettings()
-    }
-
     fun cycleNoiseReduction() {
         detachCustomPresetOnUserEdit()
         val next = when (_uiState.value.noiseReductionMode) {

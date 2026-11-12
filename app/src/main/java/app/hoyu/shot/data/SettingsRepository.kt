@@ -20,8 +20,8 @@ class SettingsRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("hoyushot_prefs", Context.MODE_PRIVATE)
 
     var isResumeSettingsEnabled: Boolean
-        get() = prefs.getBoolean("resume_settings_enabled", false)
-        set(value) = prefs.edit().putBoolean("resume_settings_enabled", value).apply()
+        get() = true
+        set(_) {}
 
     var savedCameraId: String
         get() = prefs.getString("saved_camera_id", "0") ?: "0"

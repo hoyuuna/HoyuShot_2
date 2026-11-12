@@ -105,7 +105,7 @@ data class CameraUiState(
     // Image Processing: NR & Sharpness
     val noiseReductionMode: NoiseReductionMode = NoiseReductionMode.FAST,
     val sharpnessMode: SharpnessMode = SharpnessMode.NORMAL,
-    val isResumeSettingsEnabled: Boolean = false,
+    val isResumeSettingsEnabled: Boolean = true,
 
     // Live Readout from Sensor
     val actualIso: Int = 100,

@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -210,7 +211,7 @@ fun CameraScreen(
         AspectRatio.RATIO_4_3 -> 3f / 4f
         AspectRatio.RATIO_16_9 -> 9f / 16f
         AspectRatio.RATIO_1_1 -> 1f
-        else -> 3f / 4f
+        AspectRatio.RATIO_3_2 -> 2f / 3f
     }
 
     CompositionLocalProvider(LocalUiHapticsEnabled provides (uiState.uiHapticsMode == "VIBRATE")) {
@@ -710,7 +711,6 @@ fun CameraScreen(
             uiState = uiState,
             previewBoundsInRoot = previewBoundsInRoot,
             rotationDegrees = animatedRotation,
-            onToggleResumeSettings = { viewModel.toggleResumeSettings() },
             onToggleGeotagging = {
                 if (uiState.isGeotaggingEnabled) {
                     viewModel.setGeotaggingEnabled(false)
@@ -1031,28 +1031,65 @@ private fun ViewfinderPreviewContent(
             },
         contentAlignment = Alignment.Center
     ) {
-        // Hardware Camera2 SurfaceView
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                AutoFitSurfaceView(context).apply {
-                    onSurfaceReady(this)
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            onSurfaceCreated(holder.surface)
-                        }
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            onSurfaceDestroyed()
-                        }
-                    })
-                }
-            },
-            update = { v ->
-                val (camWidth, camHeight) = uiState.previewSize
-                v.setAspectRatio(camHeight, camWidth)
+        // Hardware Camera2 SurfaceView (Center-Crop to buffer ratio so mismatched HAL ratios never stretch)
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+            contentAlignment = Alignment.Center
+        ) {
+            val density = LocalDensity.current
+            val boxW = constraints.maxWidth
+            val boxH = constraints.maxHeight
+            val (camWidth, camHeight) = uiState.previewSize
+            val bufRatio = if (camWidth > 0 && camHeight > 0) {
+                camHeight.toFloat() / camWidth.toFloat()
+            } else {
+                0f
             }
-        )
+            val (cropW, cropH) = if (bufRatio > 0f && boxW > 0 && boxH > 0) {
+                val boxRatio = boxW.toFloat() / boxH.toFloat()
+                if (kotlin.math.abs(bufRatio - boxRatio) < 0.01f) {
+                    boxW to boxH
+                } else if (bufRatio > boxRatio) {
+                    kotlin.math.round(boxH * bufRatio).toInt() to boxH
+                } else {
+                    boxW to kotlin.math.round(boxW / bufRatio).toInt()
+                }
+            } else {
+                boxW to boxH
+            }
+            val cropWidthDp = with(density) { cropW.toDp() }
+            val cropHeightDp = with(density) { cropH.toDp() }
+
+            AndroidView(
+                modifier = Modifier.requiredSize(cropWidthDp, cropHeightDp),
+                factory = { context ->
+                    AutoFitSurfaceView(context).apply {
+                        onSurfaceReady(this)
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                onSurfaceCreated(holder.surface)
+                            }
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                onSurfaceDestroyed()
+                            }
+                        })
+                    }
+                },
+                update = { v ->
+                    v.setAspectRatio(camHeight, camWidth)
+                    val left = ((cropW - boxW) / 2).coerceAtLeast(0)
+                    val top = ((cropH - boxH) / 2).coerceAtLeast(0)
+                    v.clipBounds = if (left > 0 || top > 0) {
+                        android.graphics.Rect(left, top, left + boxW, top + boxH)
+                    } else {
+                        null
+                    }
+                }
+            )
+        }
 
         // Composition Grid Overlay
         GridOverlay(gridMode = uiState.gridMode)

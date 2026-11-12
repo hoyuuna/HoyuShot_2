@@ -30,14 +30,17 @@ class AutoFitSurfaceView @JvmOverloads constructor(
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val height = MeasureSpec.getSize(heightMeasureSpec)
 
-        if (aspectRatio == 0f) {
+        if (aspectRatio == 0f ||
+            (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY &&
+                MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY)
+        ) {
             setMeasuredDimension(width, height)
         } else {
             val newWidth: Int
             val newHeight: Int
 
-            // Scale to fill the box while strictly preserving aspect ratio
-            if (width < height * aspectRatio) {
+            // Center-Crop: scale up to cover the bounds while strictly preserving aspect ratio
+            if (width > height * aspectRatio) {
                 newWidth = width
                 newHeight = (width / aspectRatio).roundToInt()
             } else {

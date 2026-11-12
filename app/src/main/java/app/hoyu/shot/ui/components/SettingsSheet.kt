@@ -40,7 +40,6 @@ fun SettingsDialog(
     uiState: CameraUiState,
     previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
-    onToggleResumeSettings: () -> Unit,
     onToggleGeotagging: () -> Unit,
     onSelectTimerMode: (TimerMode) -> Unit,
     onCycleNoiseReduction: () -> Unit,
@@ -117,64 +116,6 @@ fun SettingsDialog(
                             .clickable { onDismiss() }
                             .padding(4.dp)
                     )
-                }
-
-                // 1. Resume Settings Row (Entire row clickable)
-                val isResume = uiState.isResumeSettingsEnabled
-                val resumeBgColor by animateColorAsState(
-                    targetValue = if (isResume) Color(0x33E11D48) else Color(0xFF18181B),
-                    label = "resumeBg"
-                )
-                val resumeBorderColor by animateColorAsState(
-                    targetValue = if (isResume) Color(0xFFE11D48) else Color(0xFF27272A),
-                    label = "resumeBorder"
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .background(resumeBgColor)
-                        .border(1.dp, resumeBorderColor, shape)
-                        .clickable {
-                            view.triggerUiHaptic(uiHapticsEnabled)
-                            onToggleResumeSettings()
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "RESUME SETTINGS",
-                            color = if (isResume) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = if (isResume) "Saves manual dials across app launches" else "Resets to Auto on boot",
-                            color = Color(0xFF71717A),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(shape)
-                            .background(if (isResume) Color(0xFFE11D48) else Color(0xFF27272A))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isResume) "ON" else "OFF",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
                 }
 
                 // Geotagging GPS Toggle
