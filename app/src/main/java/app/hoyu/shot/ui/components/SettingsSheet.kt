@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.CameraUiState
+import app.hoyu.shot.model.ColorProfile
 import app.hoyu.shot.model.NoiseReductionMode
 import app.hoyu.shot.model.SharpnessMode
 import app.hoyu.shot.model.TimerMode
@@ -44,6 +45,7 @@ fun SettingsDialog(
     onSelectTimerMode: (TimerMode) -> Unit,
     onCycleNoiseReduction: () -> Unit,
     onCycleSharpness: () -> Unit,
+    onSelectColorProfile: (ColorProfile) -> Unit = {},
     onToggleHistogram: () -> Unit,
     onToggleHorizon: () -> Unit,
     onTogglePeaking: () -> Unit,
@@ -305,6 +307,66 @@ fun SettingsDialog(
                             fontWeight = FontWeight.Black,
                             fontFamily = FontFamily.Monospace
                         )
+                    }
+                }
+
+                // 2b. Color Profile Engine (OFF / NAT / VIV)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF18181B))
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "COLOR // ENGINE",
+                            color = Color(0xFFA1A1AA),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = uiState.colorProfile.fullName.uppercase(),
+                            color = if (uiState.colorProfile != ColorProfile.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        ColorProfile.entries.forEach { profile ->
+                            val selected = uiState.colorProfile == profile
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(shape)
+                                    .background(if (selected) Color(0xFFE11D48) else Color(0xFF27272A))
+                                    .clickable {
+                                        view.triggerUiHaptic(uiHapticsEnabled)
+                                        onSelectColorProfile(profile)
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = profile.label,
+                                    color = if (selected) Color(0xFFFAFAFA) else Color(0xFFA1A1AA),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
                     }
                 }
 

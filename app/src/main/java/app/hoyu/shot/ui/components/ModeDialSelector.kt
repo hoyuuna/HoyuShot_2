@@ -26,8 +26,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.hoyu.shot.model.CustomModePreset
 import app.hoyu.shot.model.ExposureMode
 import kotlinx.coroutines.delay
 
@@ -35,11 +37,16 @@ import kotlinx.coroutines.delay
 fun ModeDialSelectorModal(
     visible: Boolean,
     currentMode: ExposureMode,
+    customPresets: List<CustomModePreset> = emptyList(),
+    activeCustomPresetId: String? = null,
     isBlurEnabled: Boolean = true,
     blurredBackdrop: ImageBitmap? = null,
     previewBoundsInRoot: Rect = Rect.Zero,
     rotationDegrees: Float = 0f,
     onModeSelected: (ExposureMode) -> Unit,
+    onCustomPresetSelected: (CustomModePreset) -> Unit = {},
+    onRequestCreateCustom: () -> Unit = {},
+    onRequestDeleteCustom: (CustomModePreset) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -105,8 +112,8 @@ fun ModeDialSelectorModal(
                 previewBoundsInRoot = previewBoundsInRoot,
                 rotationDegrees = rotationDegrees,
                 modifier = Modifier
-                    .width(280.dp)
-                    .heightIn(max = 260.dp) // Safe bounds preventing overflow in landscape
+                    .width(288.dp)
+                    .heightIn(max = 330.dp) // Safe bounds preventing overflow in landscape
             ) {
             Column(
                 modifier = Modifier
@@ -149,7 +156,7 @@ fun ModeDialSelectorModal(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     modes.forEach { mode ->
-                        val isSelected = currentMode == mode
+                        val isSelected = activeCustomPresetId == null && currentMode == mode
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -208,6 +215,178 @@ fun ModeDialSelectorModal(
                                     fontFamily = FontFamily.Monospace,
                                     maxLines = 1
                                 )
+                            }
+                        }
+                    }
+
+                    // Create Custom Preset button right below M (MANUAL)
+                    val isEligibleMode = currentMode.isCustomPresetEligible()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .background(Color(0xFF141418))
+                            .border(
+                                1.dp,
+                                if (isEligibleMode) Color(0xFF52525B) else Color(0xFF27272A),
+                                shape
+                            )
+                            .clickable {
+                                view.triggerUiHaptic(uiHapticsEnabled)
+                                onRequestCreateCustom()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(shape)
+                                .background(if (isEligibleMode) Color(0xFF27272A) else Color(0xFF18181B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "+",
+                                color = if (isEligibleMode) Color(0xFFFAFAFA) else Color(0xFF71717A),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "CREATE CUSTOM MODE",
+                                color = if (isEligibleMode) Color(0xFFFAFAFA) else Color(0xFFA1A1AA),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = if (isEligibleMode) {
+                                    "Save current ${currentMode.label} settings as preset"
+                                } else {
+                                    "Requires S, ISO, or M mode"
+                                },
+                                color = Color(0xFF71717A),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (customPresets.isNotEmpty()) {
+                        Text(
+                            text = "CUSTOM // PRESETS (${customPresets.size})",
+                            color = Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.8.sp,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                        )
+
+                        customPresets.forEachIndexed { idx, preset ->
+                            val isPresetSelected = activeCustomPresetId == preset.id
+                            val badgeText = "C${idx + 1}"
+                            val summary = formatCustomPresetSummary(
+                                shutterSpeedNanos = preset.shutterSpeedNanos,
+                                iso = preset.iso,
+                                whiteBalancePreset = preset.whiteBalancePreset,
+                                kelvinTemperature = preset.kelvinTemperature,
+                                aspectRatioName = preset.aspectRatio.ratioName,
+                                captureFormatLabel = preset.captureFormat.label
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(shape)
+                                    .background(if (isPresetSelected) Color(0x33E11D48) else Color(0xFF18181B))
+                                    .border(
+                                        1.dp,
+                                        if (isPresetSelected) Color(0xFFE11D48) else Color(0xFF27272A),
+                                        shape
+                                    )
+                                    .clickable {
+                                        view.triggerUiHaptic(uiHapticsEnabled)
+                                        onCustomPresetSelected(preset)
+                                        onDismiss()
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(shape)
+                                        .background(if (isPresetSelected) Color(0xFFE11D48) else Color(0xFF27272A)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = badgeText,
+                                        color = Color.White,
+                                        fontSize = if (badgeText.length > 2) 10.sp else 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Text(
+                                            text = preset.name,
+                                            color = if (isPresetSelected) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        Text(
+                                            text = "[${preset.baseMode.label}]",
+                                            color = Color(0xFFA1A1AA),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Text(
+                                        text = summary,
+                                        color = Color(0xFF71717A),
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(shape)
+                                        .background(Color(0xFF27272A))
+                                        .clickable {
+                                            view.triggerUiHaptic(uiHapticsEnabled)
+                                            onRequestDeleteCustom(preset)
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "DEL",
+                                        color = Color(0xFFFF4D6D),
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
                             }
                         }
                     }

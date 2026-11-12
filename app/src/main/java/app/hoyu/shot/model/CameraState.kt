@@ -171,7 +171,14 @@ data class CameraUiState(
     val simulatedTeleBaseZoom: Float = 1.0f,
 
     // UI Active parameter dial
-    val activeDialParameter: DialParameter? = null
+    val activeDialParameter: DialParameter? = null,
+
+    // User-created immutable Custom Shooting Mode Presets
+    val customPresets: List<CustomModePreset> = emptyList(),
+    val activeCustomPresetId: String? = null,
+
+    // Natural Color Engine Profile for JPEG output
+    val colorProfile: ColorProfile = ColorProfile.NATURAL
 )
 
 enum class DialParameter {

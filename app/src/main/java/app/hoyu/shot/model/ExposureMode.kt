@@ -5,7 +5,10 @@ enum class ExposureMode(val label: String, val fullName: String, val description
     PROGRAM("P", "Program", "Camera sets ISO and Shutter. You can adjust EV compensation."),
     SHUTTER_PRIORITY("S", "Shutter Priority", "Manual Shutter speed with automatic ISO compensation."),
     ISO_PRIORITY("ISO", "ISO Priority", "Manual ISO sensitivity with automatic Shutter compensation."),
-    MANUAL("M", "Manual", "Full manual control over ISO, Shutter, Focus, and White balance.")
+    MANUAL("M", "Manual", "Full manual control over ISO, Shutter, Focus, and White balance.");
+
+    fun isCustomPresetEligible(): Boolean =
+        this == SHUTTER_PRIORITY || this == ISO_PRIORITY || this == MANUAL
 }
 
 enum class AspectRatio(val ratioName: String, val widthFactor: Int, val heightFactor: Int) {
@@ -64,6 +67,12 @@ enum class CaptureFormat(val label: String) {
     RAW_JPEG("RAW+JPEG")
 }
 
+enum class ColorProfile(val label: String, val fullName: String) {
+    OFF("OFF", "Pure HAL"),
+    NATURAL("NAT", "Natural"),
+    VIVID("VIV", "Vivid")
+}
+
 data class CapturedPhotoInfo(
     val uriString: String,
     val isRaw: Boolean,
@@ -76,4 +85,32 @@ data class CapturedPhotoInfo(
     val fileName: String = "",
     val fileSizeBytes: Long = 0L,
     val aperture: String = "f/1.8"
+)
+
+data class CustomModePreset(
+    val id: String,
+    val name: String,
+    val baseMode: ExposureMode,
+    val iso: Int,
+    val shutterSpeedNanos: Long,
+    val focusDistanceDiopters: Float,
+    val isManualFocusEnabled: Boolean,
+    val evCompensationIndex: Int,
+    val whiteBalancePreset: WhiteBalancePreset,
+    val kelvinTemperature: Int,
+    val cameraId: String,
+    val lensId: String,
+    val digitalZoomRatio: Float,
+    val aspectRatio: AspectRatio,
+    val captureFormat: CaptureFormat,
+    val resolutionWidth: Int?,
+    val resolutionHeight: Int?,
+    val resolutionMpLabel: String?,
+    val flashMode: FlashMode,
+    val noiseReductionMode: NoiseReductionMode,
+    val sharpnessMode: SharpnessMode,
+    val minShutterLimitNanos: Long? = null,
+    val maxIsoLimit: Int? = null,
+    val colorProfile: ColorProfile = ColorProfile.NATURAL,
+    val createdAt: Long = 0L
 )

@@ -1,5 +1,17 @@
 package app.hoyu.shot.data
 
+import app.hoyu.shot.model.AspectRatio
+import app.hoyu.shot.model.CaptureFormat
+import app.hoyu.shot.model.ColorProfile
+import app.hoyu.shot.model.CustomModePreset
+import app.hoyu.shot.model.ExposureMode
+import app.hoyu.shot.model.FlashMode
+import app.hoyu.shot.model.NoiseReductionMode
+import app.hoyu.shot.model.SharpnessMode
+import app.hoyu.shot.model.WhiteBalancePreset
+import org.json.JSONArray
+import org.json.JSONObject
+
 import android.content.Context
 import android.content.SharedPreferences
 
@@ -180,4 +192,114 @@ class SettingsRepository(context: Context) {
     var isHqViewportEnabled: Boolean
         get() = prefs.getBoolean("adv_hq_viewport", true)
         set(value) = prefs.edit().putBoolean("adv_hq_viewport", value).apply()
+
+    var savedColorProfile: String
+        get() = prefs.getString("saved_color_profile", ColorProfile.NATURAL.name) ?: ColorProfile.NATURAL.name
+        set(value) = prefs.edit().putString("saved_color_profile", value).apply()
+
+    var savedActiveCustomPresetId: String?
+        get() = prefs.getString("saved_active_custom_preset_id", null)
+        set(value) = if (value == null) {
+            prefs.edit().remove("saved_active_custom_preset_id").apply()
+        } else {
+            prefs.edit().putString("saved_active_custom_preset_id", value).apply()
+        }
+
+    fun loadCustomPresets(): List<CustomModePreset> {
+        val raw = prefs.getString("saved_custom_presets_json", null) ?: return emptyList()
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    val name = obj.optString("name").takeIf { it.isNotBlank() } ?: continue
+                    val baseMode = runCatching {
+                        ExposureMode.valueOf(obj.optString("baseMode"))
+                    }.getOrNull()?.takeIf { it.isCustomPresetEligible() } ?: continue
+
+                    add(
+                        CustomModePreset(
+                            id = id,
+                            name = name,
+                            baseMode = baseMode,
+                            iso = obj.optInt("iso", 100),
+                            shutterSpeedNanos = obj.optLong("shutterSpeedNanos", 10_000_000L),
+                            focusDistanceDiopters = obj.optDouble("focusDistanceDiopters", 0.0).toFloat(),
+                            isManualFocusEnabled = obj.optBoolean("isManualFocusEnabled", false),
+                            evCompensationIndex = obj.optInt("evCompensationIndex", 0),
+                            whiteBalancePreset = runCatching {
+                                WhiteBalancePreset.valueOf(obj.optString("whiteBalancePreset"))
+                            }.getOrDefault(WhiteBalancePreset.AUTO),
+                            kelvinTemperature = obj.optInt("kelvinTemperature", 5500),
+                            cameraId = obj.optString("cameraId", "0"),
+                            lensId = obj.optString("lensId", "phys_0"),
+                            digitalZoomRatio = obj.optDouble("digitalZoomRatio", 1.0).toFloat(),
+                            aspectRatio = runCatching {
+                                AspectRatio.valueOf(obj.optString("aspectRatio"))
+                            }.getOrDefault(AspectRatio.RATIO_4_3),
+                            captureFormat = runCatching {
+                                CaptureFormat.valueOf(obj.optString("captureFormat"))
+                            }.getOrDefault(CaptureFormat.JPEG),
+                            resolutionWidth = if (obj.has("resolutionWidth") && !obj.isNull("resolutionWidth")) obj.optInt("resolutionWidth") else null,
+                            resolutionHeight = if (obj.has("resolutionHeight") && !obj.isNull("resolutionHeight")) obj.optInt("resolutionHeight") else null,
+                            resolutionMpLabel = if (obj.has("resolutionMpLabel") && !obj.isNull("resolutionMpLabel")) obj.optString("resolutionMpLabel") else null,
+                            flashMode = runCatching {
+                                FlashMode.valueOf(obj.optString("flashMode"))
+                            }.getOrDefault(FlashMode.OFF),
+                            noiseReductionMode = runCatching {
+                                NoiseReductionMode.valueOf(obj.optString("noiseReductionMode"))
+                            }.getOrDefault(NoiseReductionMode.FAST),
+                            sharpnessMode = runCatching {
+                                SharpnessMode.valueOf(obj.optString("sharpnessMode"))
+                            }.getOrDefault(SharpnessMode.NORMAL),
+                            minShutterLimitNanos = if (obj.has("minShutterLimitNanos") && !obj.isNull("minShutterLimitNanos")) obj.optLong("minShutterLimitNanos") else null,
+                            maxIsoLimit = if (obj.has("maxIsoLimit") && !obj.isNull("maxIsoLimit")) obj.optInt("maxIsoLimit") else null,
+                            colorProfile = runCatching {
+                                ColorProfile.valueOf(obj.optString("colorProfile"))
+                            }.getOrDefault(ColorProfile.NATURAL),
+                            createdAt = obj.optLong("createdAt", 0L)
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveCustomPresets(presets: List<CustomModePreset>) {
+        val array = JSONArray()
+        presets.forEach { preset ->
+            val obj = JSONObject().apply {
+                put("id", preset.id)
+                put("name", preset.name)
+                put("baseMode", preset.baseMode.name)
+                put("iso", preset.iso)
+                put("shutterSpeedNanos", preset.shutterSpeedNanos)
+                put("focusDistanceDiopters", preset.focusDistanceDiopters.toDouble())
+                put("isManualFocusEnabled", preset.isManualFocusEnabled)
+                put("evCompensationIndex", preset.evCompensationIndex)
+                put("whiteBalancePreset", preset.whiteBalancePreset.name)
+                put("kelvinTemperature", preset.kelvinTemperature)
+                put("cameraId", preset.cameraId)
+                put("lensId", preset.lensId)
+                put("digitalZoomRatio", preset.digitalZoomRatio.toDouble())
+                put("aspectRatio", preset.aspectRatio.name)
+                put("captureFormat", preset.captureFormat.name)
+                put("resolutionWidth", preset.resolutionWidth ?: JSONObject.NULL)
+                put("resolutionHeight", preset.resolutionHeight ?: JSONObject.NULL)
+                put("resolutionMpLabel", preset.resolutionMpLabel ?: JSONObject.NULL)
+                put("flashMode", preset.flashMode.name)
+                put("noiseReductionMode", preset.noiseReductionMode.name)
+                put("sharpnessMode", preset.sharpnessMode.name)
+                put("minShutterLimitNanos", preset.minShutterLimitNanos ?: JSONObject.NULL)
+                put("maxIsoLimit", preset.maxIsoLimit ?: JSONObject.NULL)
+                put("colorProfile", preset.colorProfile.name)
+                put("createdAt", preset.createdAt)
+            }
+            array.put(obj)
+        }
+        prefs.edit().putString("saved_custom_presets_json", array.toString()).apply()
+    }
 }

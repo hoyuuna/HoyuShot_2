@@ -115,6 +115,9 @@ fun CameraScreen(
     var previewBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
 
     var isModeModalVisible by remember { mutableStateOf(false) }
+    var isCustomNameDialogVisible by remember { mutableStateOf(false) }
+    var customPresetToDelete by remember { mutableStateOf<app.hoyu.shot.model.CustomModePreset?>(null) }
+    var customModeErrorMessage by remember { mutableStateOf<String?>(null) }
     var isSettingsDialogVisible by remember { mutableStateOf(false) }
     var isAdvancedSettingsVisible by remember { mutableStateOf(false) }
     var scrollToUpdates by remember { mutableStateOf(false) }
@@ -134,6 +137,9 @@ fun CameraScreen(
             activeParamMenu = null
             isFormatMenuVisible = false
             isModeModalVisible = false
+            isCustomNameDialogVisible = false
+            customPresetToDelete = null
+            customModeErrorMessage = null
             isSettingsDialogVisible = false
             isAdvancedSettingsVisible = true
             scrollToUpdates = true
@@ -143,10 +149,21 @@ fun CameraScreen(
 
     // Intercept system Back button so it navigates internally inside the app
     BackHandler(
-        enabled = uiState.isGalleryVisible || activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
+        enabled = uiState.isGalleryVisible ||
+            activeParamMenu != null ||
+            isFormatMenuVisible ||
+            isModeModalVisible ||
+            isCustomNameDialogVisible ||
+            customPresetToDelete != null ||
+            customModeErrorMessage != null ||
+            isSettingsDialogVisible ||
+            isAdvancedSettingsVisible
     ) {
         when {
             uiState.isGalleryVisible -> viewModel.closeGallery()
+            customModeErrorMessage != null -> customModeErrorMessage = null
+            customPresetToDelete != null -> customPresetToDelete = null
+            isCustomNameDialogVisible -> isCustomNameDialogVisible = false
             isAdvancedSettingsVisible -> {
                 isAdvancedSettingsVisible = false
                 scrollToUpdates = false
@@ -209,7 +226,14 @@ fun CameraScreen(
         val leftoverHeight = maxHeight - previewHeightEstimate
         val isOverlayNeeded = leftoverHeight < 210.dp
 
-        val isAnyPopupOpen = activeParamMenu != null || isFormatMenuVisible || isModeModalVisible || isSettingsDialogVisible || isAdvancedSettingsVisible
+        val isAnyPopupOpen = activeParamMenu != null ||
+            isFormatMenuVisible ||
+            isModeModalVisible ||
+            isCustomNameDialogVisible ||
+            customPresetToDelete != null ||
+            customModeErrorMessage != null ||
+            isSettingsDialogVisible ||
+            isAdvancedSettingsVisible
 
         LaunchedEffect(isAnyPopupOpen, uiState.isUiBlurEnabled) {
             viewModel.setPopupBackdropBlurActive(isAnyPopupOpen && uiState.isUiBlurEnabled)
@@ -461,6 +485,9 @@ fun CameraScreen(
                         activeParamMenu = null
                         isFormatMenuVisible = false
                         isModeModalVisible = false
+                        isCustomNameDialogVisible = false
+                        customPresetToDelete = null
+                        customModeErrorMessage = null
                         isSettingsDialogVisible = false
                         isAdvancedSettingsVisible = false
                     }
@@ -609,12 +636,71 @@ fun CameraScreen(
         ModeDialSelectorModal(
             visible = isModeModalVisible,
             currentMode = uiState.exposureMode,
+            customPresets = uiState.customPresets,
+            activeCustomPresetId = uiState.activeCustomPresetId,
             isBlurEnabled = uiState.isUiBlurEnabled,
             blurredBackdrop = uiState.blurredBackdrop,
             previewBoundsInRoot = previewBoundsInRoot,
             rotationDegrees = animatedRotation,
             onModeSelected = { viewModel.setExposureMode(it) },
+            onCustomPresetSelected = { preset ->
+                viewModel.applyCustomPreset(preset)?.let { err ->
+                    customModeErrorMessage = err
+                }
+            },
+            onRequestCreateCustom = {
+                isModeModalVisible = false
+                if (uiState.exposureMode.isCustomPresetEligible()) {
+                    isCustomNameDialogVisible = true
+                } else {
+                    customModeErrorMessage = "Custom modes can only be created when shooting in S, ISO, or M mode."
+                }
+            },
+            onRequestDeleteCustom = { preset ->
+                isModeModalVisible = false
+                customPresetToDelete = preset
+            },
             onDismiss = { isModeModalVisible = false },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Custom Mode Popups: 1) Name Input, 2) Delete Confirm, 3) Error
+        CustomModeNameDialog(
+            visible = isCustomNameDialogVisible,
+            uiState = uiState,
+            previewBoundsInRoot = previewBoundsInRoot,
+            rotationDegrees = animatedRotation,
+            onConfirm = { name ->
+                isCustomNameDialogVisible = false
+                viewModel.createCustomPreset(name)?.let { err ->
+                    customModeErrorMessage = err
+                }
+            },
+            onDismiss = { isCustomNameDialogVisible = false },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        CustomModeDeleteDialog(
+            preset = customPresetToDelete,
+            isBlurEnabled = uiState.isUiBlurEnabled,
+            blurredBackdrop = uiState.blurredBackdrop,
+            previewBoundsInRoot = previewBoundsInRoot,
+            rotationDegrees = animatedRotation,
+            onConfirmDelete = { preset ->
+                viewModel.deleteCustomPreset(preset.id)
+                customPresetToDelete = null
+            },
+            onDismiss = { customPresetToDelete = null },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        CustomModeErrorDialog(
+            errorMessage = customModeErrorMessage,
+            isBlurEnabled = uiState.isUiBlurEnabled,
+            blurredBackdrop = uiState.blurredBackdrop,
+            previewBoundsInRoot = previewBoundsInRoot,
+            rotationDegrees = animatedRotation,
+            onDismiss = { customModeErrorMessage = null },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -635,6 +721,7 @@ fun CameraScreen(
             onCycleNoiseReduction = { viewModel.cycleNoiseReduction() },
             onSelectTimerMode = { viewModel.setTimerMode(it) },
             onCycleSharpness = { viewModel.cycleSharpness() },
+            onSelectColorProfile = { viewModel.setColorProfile(it) },
             onToggleHistogram = { viewModel.toggleHistogram() },
             onToggleHorizon = { viewModel.toggleHorizon() },
             onTogglePeaking = { viewModel.toggleFocusPeaking() },
@@ -1274,13 +1361,18 @@ private fun BottomControlsContent(
                 onClick = onOpenGallery
             )
 
-            // Mode Selector Button [A]
+            // Mode Selector Button [A] / [M] / [C1]
+            val activeCustomIdx = uiState.activeCustomPresetId
+                ?.let { id -> uiState.customPresets.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
+            val modeBadgeText = if (activeCustomIdx != null) "C${activeCustomIdx + 1}" else uiState.exposureMode.label
+            val modeBorderColor = if (activeCustomIdx != null) Color(0xFFE11D48) else Color(0xFFFAFAFA)
             Box(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(shape)
-                    .background(Color(0x33000000))
-                    .border(1.dp, Color(0xFFFAFAFA), shape)
+                    .background(if (activeCustomIdx != null) Color(0x33E11D48) else Color(0x33000000))
+                    .border(1.dp, modeBorderColor, shape)
                     .clickable {
                         view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                         onOpenModeModal()
@@ -1288,9 +1380,9 @@ private fun BottomControlsContent(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = uiState.exposureMode.label,
+                    text = modeBadgeText,
                     color = Color(0xFFFAFAFA),
-                    fontSize = 14.sp,
+                    fontSize = if (modeBadgeText.length > 2) 11.sp else 14.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.rotate(animatedRotation)

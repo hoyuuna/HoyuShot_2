@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -265,6 +266,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.isMirrorSelfie = settingsRepo.isMirrorSelfie
         cameraController.antibandingMode = settingsRepo.antibandingMode
         cameraController.cameraSoundMode = settingsRepo.cameraSoundMode
+        val initColorProfile = runCatching {
+            ColorProfile.valueOf(settingsRepo.savedColorProfile)
+        }.getOrDefault(ColorProfile.NATURAL)
+        val initCustomPresets = settingsRepo.loadCustomPresets()
+        val initActiveCustomId = if (isResume) {
+            settingsRepo.savedActiveCustomPresetId?.takeIf { id -> initCustomPresets.any { it.id == id } }
+        } else {
+            null
+        }
+        if (initActiveCustomId == null && settingsRepo.savedActiveCustomPresetId != null) {
+            settingsRepo.savedActiveCustomPresetId = null
+        }
+
+        cameraController.colorProfile = initColorProfile
         cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
         cameraController.isHqViewportEnabled = settingsRepo.isHqViewportEnabled
 
@@ -317,7 +332,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isPreReleaseUpdateEnabled = settingsRepo.isPreReleaseUpdateEnabled,
                 isTeleZoomFallbackEnabled = settingsRepo.isTeleZoomFallbackEnabled,
                 isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled,
-                isHqViewportEnabled = settingsRepo.isHqViewportEnabled
+                isHqViewportEnabled = settingsRepo.isHqViewportEnabled,
+                customPresets = initCustomPresets,
+                activeCustomPresetId = initActiveCustomId,
+                colorProfile = initColorProfile
             )
         }
 
@@ -476,6 +494,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleNoiseReduction() {
+        detachCustomPresetOnUserEdit()
         val next = when (_uiState.value.noiseReductionMode) {
             NoiseReductionMode.OFF -> NoiseReductionMode.FAST
             NoiseReductionMode.FAST -> NoiseReductionMode.HIGH_QUALITY
@@ -487,6 +506,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleSharpness() {
+        detachCustomPresetOnUserEdit()
         val next = when (_uiState.value.sharpnessMode) {
             SharpnessMode.OFF -> SharpnessMode.NORMAL
             SharpnessMode.NORMAL -> SharpnessMode.HIGH
@@ -510,6 +530,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleFlash() {
+        detachCustomPresetOnUserEdit()
         val next = when (_uiState.value.flashMode) {
             FlashMode.OFF -> FlashMode.AUTO
             FlashMode.AUTO -> FlashMode.ON
@@ -823,6 +844,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setCaptureFormat(format: CaptureFormat) {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         val supportsRaw = caps?.supportsRawCapture == true && caps.supportedRawSizes.isNotEmpty()
         val effectiveFormat = if (!supportsRaw && format != CaptureFormat.JPEG) {
@@ -846,6 +868,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setResolution(res: CameraResolution) {
+        detachCustomPresetOnUserEdit()
         _uiState.update {
             it.copy(
                 selectedResolution = res,
@@ -872,6 +895,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectLens(lens: LensItem) {
+        detachCustomPresetOnUserEdit()
         val surface = activeSurface ?: return
         val currentCamId = _uiState.value.currentCameraId
         lastAttemptedLens = lens
@@ -1003,6 +1027,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onPinchZoom(zoomMultiplier: Float) {
+        detachCustomPresetOnUserEdit()
         val currentDigital = _uiState.value.digitalZoomRatio
         val newDigital = (currentDigital * zoomMultiplier).coerceIn(1.0f, 10.0f)
         val baseZoom = _uiState.value.simulatedTeleBaseZoom
@@ -1014,6 +1039,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resetDigitalZoom() {
+        detachCustomPresetOnUserEdit()
         val baseZoom = _uiState.value.simulatedTeleBaseZoom
         _uiState.update { it.copy(digitalZoomRatio = 1.0f) }
         cameraController.currentZoomRatio = baseZoom
@@ -1021,6 +1047,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stepZoom(factor: Float) {
+        detachCustomPresetOnUserEdit()
         val currentDigital = _uiState.value.digitalZoomRatio
         val newDigital = (currentDigital * factor).coerceIn(1.0f, 10.0f)
         val baseZoom = _uiState.value.simulatedTeleBaseZoom
@@ -1032,6 +1059,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setZoomRatio(zoom: Float) {
+        detachCustomPresetOnUserEdit()
         val clamped = zoom.coerceIn(_uiState.value.minZoomRatio, _uiState.value.maxZoomRatio)
         _uiState.update { it.copy(currentZoomRatio = clamped) }
         applyCurrentSettings()
@@ -1174,6 +1202,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setAspectRatio(ratio: AspectRatio) {
+        detachCustomPresetOnUserEdit()
         val surface = activeSurface ?: return
         val caps = _uiState.value.capabilities
         val resList = computeAvailableResolutions(caps, ratio)
@@ -1206,6 +1235,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleShutterLimit(nanos: Long) {
+        detachCustomPresetOnUserEdit()
         val currentLimit = _uiState.value.minShutterLimitNanos
         val newLimit = if (currentLimit == nanos) null else nanos
         _uiState.update { it.copy(minShutterLimitNanos = newLimit, exposureMode = ExposureMode.AUTO) }
@@ -1215,6 +1245,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleIsoLimit(iso: Int) {
+        detachCustomPresetOnUserEdit()
         val currentLimit = _uiState.value.maxIsoLimit
         val newLimit = if (currentLimit == iso) null else iso
         _uiState.update { it.copy(maxIsoLimit = newLimit, exposureMode = ExposureMode.AUTO) }
@@ -1223,7 +1254,202 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applyCurrentSettings()
     }
 
+    fun setColorProfile(profile: ColorProfile) {
+        detachCustomPresetOnUserEdit()
+        _uiState.update { it.copy(colorProfile = profile) }
+        settingsRepo.savedColorProfile = profile.name
+        cameraController.colorProfile = profile
+    }
+
+    private fun detachCustomPresetOnUserEdit() {
+        if (_uiState.value.activeCustomPresetId != null) {
+            _uiState.update { it.copy(activeCustomPresetId = null) }
+            settingsRepo.savedActiveCustomPresetId = null
+        }
+    }
+
+    fun createCustomPreset(rawName: String): String? {
+        val state = _uiState.value
+        if (!state.exposureMode.isCustomPresetEligible()) {
+            return "Custom presets can only be created in S, ISO, or M mode."
+        }
+        val trimmedName = rawName.trim()
+        if (trimmedName.isEmpty()) {
+            return "Preset name cannot be empty."
+        }
+        if (state.customPresets.any { it.name.equals(trimmedName, ignoreCase = true) }) {
+            return "A custom preset named \"$trimmedName\" already exists."
+        }
+        if (state.availableLenses.isEmpty() || state.capabilities == null) {
+            return "Camera hardware capabilities are not ready yet."
+        }
+
+        val preset = CustomModePreset(
+            id = UUID.randomUUID().toString(),
+            name = trimmedName,
+            baseMode = state.exposureMode,
+            iso = state.iso,
+            shutterSpeedNanos = state.shutterSpeedNanos,
+            focusDistanceDiopters = state.focusDistanceDiopters,
+            isManualFocusEnabled = state.isManualFocusEnabled,
+            evCompensationIndex = state.evCompensationIndex,
+            whiteBalancePreset = state.whiteBalancePreset,
+            kelvinTemperature = state.kelvinTemperature,
+            cameraId = state.currentCameraId,
+            lensId = state.currentLens?.id ?: "phys_${state.currentCameraId}",
+            digitalZoomRatio = state.digitalZoomRatio,
+            aspectRatio = state.aspectRatio,
+            captureFormat = state.captureFormat,
+            resolutionWidth = state.selectedResolution?.width,
+            resolutionHeight = state.selectedResolution?.height,
+            resolutionMpLabel = state.selectedResolution?.mpLabel,
+            flashMode = state.flashMode,
+            noiseReductionMode = state.noiseReductionMode,
+            sharpnessMode = state.sharpnessMode,
+            minShutterLimitNanos = state.minShutterLimitNanos,
+            maxIsoLimit = state.maxIsoLimit,
+            colorProfile = state.colorProfile,
+            createdAt = System.currentTimeMillis()
+        )
+        val updated = state.customPresets + preset
+        settingsRepo.saveCustomPresets(updated)
+        settingsRepo.savedActiveCustomPresetId = preset.id
+        _uiState.update {
+            it.copy(
+                customPresets = updated,
+                activeCustomPresetId = preset.id
+            )
+        }
+        if (state.isResumeSettingsEnabled) {
+            persistCurrentSettings()
+        }
+        return null
+    }
+
+    fun applyCustomPreset(preset: CustomModePreset): String? {
+        val state = _uiState.value
+        val targetLens = state.availableLenses.find { it.id == preset.lensId }
+            ?: state.availableLenses.find { it.cameraId == preset.cameraId }
+            ?: return "Required camera lens (ID ${preset.cameraId}) is unavailable on this device."
+
+        val useSimulatedFallback = failedPhysicalCameraIds.contains(targetLens.cameraId) && canUseZoomFallback(targetLens)
+        val effectiveCameraId = if (useSimulatedFallback) "0" else targetLens.cameraId
+        val caps = inspector.inspectCamera(effectiveCameraId)
+            ?: return "Unable to inspect hardware capabilities for ${targetLens.label} lens."
+
+        val supportsRaw = caps.supportsRawCapture && caps.supportedRawSizes.isNotEmpty()
+        if (preset.captureFormat != CaptureFormat.JPEG && !supportsRaw) {
+            return "${targetLens.label} lens does not support ${preset.captureFormat.label} capture."
+        }
+        if (preset.isManualFocusEnabled && !caps.supportsManualFocus) {
+            return "${targetLens.label} lens does not support manual focus."
+        }
+
+        val clampedIso = caps.isoRange?.let { preset.iso.coerceIn(it.lower, it.upper) } ?: preset.iso
+        val clampedShutter = caps.shutterSpeedRangeNanos?.let { preset.shutterSpeedNanos.coerceIn(it.lower, it.upper) } ?: preset.shutterSpeedNanos
+        val clampedFocus = if (caps.supportsManualFocus) {
+            preset.focusDistanceDiopters.coerceIn(0f, caps.minFocusDistanceDiopters)
+        } else 0f
+        val clampedEv = caps.evCompensationRange?.let { preset.evCompensationIndex.coerceIn(it.lower, it.upper) } ?: preset.evCompensationIndex
+        val clampedMinShutter = preset.minShutterLimitNanos?.let { lim ->
+            caps.shutterSpeedRangeNanos?.let { lim.coerceIn(it.lower, it.upper) } ?: lim
+        }
+        val clampedMaxIso = preset.maxIsoLimit?.let { lim ->
+            caps.isoRange?.let { lim.coerceIn(it.lower, it.upper) } ?: lim
+        }
+
+        val resList = computeAvailableResolutions(caps, preset.aspectRatio)
+        val matchedRes = resList.find {
+            it.width == preset.resolutionWidth && it.height == preset.resolutionHeight
+        } ?: resList.find {
+            it.mpLabel == preset.resolutionMpLabel
+        } ?: resList.firstOrNull()
+
+        val targetSimBaseZoom = if (useSimulatedFallback) {
+            if (targetLens.zoomRatio > 1.5f) targetLens.zoomRatio + 0.1f else targetLens.zoomRatio
+        } else {
+            1.0f
+        }
+        val clampedDigitalZoom = preset.digitalZoomRatio.coerceIn(1.0f, 10.0f)
+
+        val needsCameraSwitch = effectiveCameraId != state.currentCameraId ||
+            preset.aspectRatio != state.aspectRatio ||
+            matchedRes?.width != state.selectedResolution?.width ||
+            matchedRes?.height != state.selectedResolution?.height
+
+        if (matchedRes != null) {
+            cameraController.targetResolution = Pair(matchedRes.width, matchedRes.height)
+        }
+        cameraController.captureFormat = preset.captureFormat
+        cameraController.colorProfile = preset.colorProfile
+        sunCompassManager.isFrontCamera = targetLens.isFront
+
+        _uiState.update {
+            it.copy(
+                activeCustomPresetId = preset.id,
+                exposureMode = preset.baseMode,
+                iso = clampedIso,
+                shutterSpeedNanos = clampedShutter,
+                focusDistanceDiopters = clampedFocus,
+                isManualFocusEnabled = preset.isManualFocusEnabled && caps.supportsManualFocus,
+                evCompensationIndex = clampedEv,
+                whiteBalancePreset = preset.whiteBalancePreset,
+                kelvinTemperature = preset.kelvinTemperature,
+                currentLens = targetLens,
+                currentCameraId = effectiveCameraId,
+                currentZoomRatio = targetLens.zoomRatio,
+                digitalZoomRatio = clampedDigitalZoom,
+                simulatedTeleBaseZoom = targetSimBaseZoom,
+                capabilities = caps,
+                aspectRatio = preset.aspectRatio,
+                availableResolutions = resList,
+                selectedResolution = matchedRes,
+                selectedMegapixels = matchedRes?.mpLabel ?: it.selectedMegapixels,
+                captureFormat = preset.captureFormat,
+                captureRaw = preset.captureFormat == CaptureFormat.RAW || preset.captureFormat == CaptureFormat.RAW_JPEG,
+                flashMode = preset.flashMode,
+                noiseReductionMode = preset.noiseReductionMode,
+                sharpnessMode = preset.sharpnessMode,
+                minShutterLimitNanos = clampedMinShutter,
+                maxIsoLimit = clampedMaxIso,
+                colorProfile = preset.colorProfile
+            )
+        }
+
+        settingsRepo.savedActiveCustomPresetId = preset.id
+        settingsRepo.savedAspectRatio = preset.aspectRatio.name
+        settingsRepo.savedColorProfile = preset.colorProfile.name
+        if (state.isResumeSettingsEnabled) {
+            persistCurrentSettings()
+        }
+
+        val surface = activeSurface
+        if (needsCameraSwitch && surface != null) {
+            cameraController.switchCamera(effectiveCameraId, surface, preset.aspectRatio) { width, height ->
+                _uiState.update { it.copy(previewSize = Pair(width, height)) }
+            }
+        }
+        applyCurrentSettings()
+        return null
+    }
+
+    fun deleteCustomPreset(presetId: String) {
+        val updated = _uiState.value.customPresets.filterNot { it.id == presetId }
+        settingsRepo.saveCustomPresets(updated)
+        val wasActive = _uiState.value.activeCustomPresetId == presetId
+        if (wasActive) {
+            settingsRepo.savedActiveCustomPresetId = null
+        }
+        _uiState.update {
+            it.copy(
+                customPresets = updated,
+                activeCustomPresetId = if (wasActive) null else it.activeCustomPresetId
+            )
+        }
+    }
+
     fun setExposureMode(mode: ExposureMode) {
+        detachCustomPresetOnUserEdit()
         val currActualIso = _uiState.value.actualIso.coerceAtLeast(50)
         val currActualShutter = _uiState.value.actualShutterSpeedNanos.coerceAtLeast(500_000L)
 
@@ -1250,6 +1476,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setIso(iso: Int) {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         val clamped = caps?.isoRange?.let { iso.coerceIn(it.lower, it.upper) } ?: iso
         _uiState.update { it.copy(iso = clamped, maxIsoLimit = null) }
@@ -1259,6 +1486,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setShutterSpeedNanos(nanos: Long) {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         val clamped = caps?.shutterSpeedRangeNanos?.let { nanos.coerceIn(it.lower, it.upper) } ?: nanos
         _uiState.update { it.copy(shutterSpeedNanos = clamped, minShutterLimitNanos = null) }
@@ -1268,6 +1496,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setFocusDistance(diopters: Float) {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         if (caps != null && !caps.supportsManualFocus) return
         val maxDiopters = caps?.minFocusDistanceDiopters ?: 10f
@@ -1281,6 +1510,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleAutoFocus() {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         if (caps != null && !caps.supportsManualFocus) {
             _uiState.update { it.copy(isManualFocusEnabled = false) }
@@ -1293,6 +1523,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setEvCompensation(evIndex: Int) {
+        detachCustomPresetOnUserEdit()
         val caps = _uiState.value.capabilities
         val clamped = caps?.evCompensationRange?.let { evIndex.coerceIn(it.lower, it.upper) } ?: evIndex
         _uiState.update { it.copy(evCompensationIndex = clamped) }
@@ -1301,11 +1532,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWhiteBalancePreset(preset: WhiteBalancePreset) {
+        detachCustomPresetOnUserEdit()
         _uiState.update { it.copy(whiteBalancePreset = preset) }
         applyCurrentSettings()
     }
 
     fun setKelvin(kelvin: Int) {
+        detachCustomPresetOnUserEdit()
         _uiState.update { it.copy(kelvinTemperature = kelvin, whiteBalancePreset = WhiteBalancePreset.CUSTOM_KELVIN) }
         if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedKelvin = kelvin
         applyCurrentSettings()

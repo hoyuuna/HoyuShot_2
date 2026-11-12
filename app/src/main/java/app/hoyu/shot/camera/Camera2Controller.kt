@@ -99,6 +99,7 @@ class Camera2Controller(
     @Volatile var isZebraOverlayEnabled: Boolean = false
     @Volatile var isBlurBackdropNeeded: Boolean = false
     @Volatile var isHqViewportEnabled: Boolean = true
+    @Volatile var colorProfile: ColorProfile = ColorProfile.NATURAL
     private var isAnalysisTargetAttached: Boolean = false
     private var lastBackdropGeneratedMs: Long = 0L
     var captureFormat: CaptureFormat = CaptureFormat.JPEG
@@ -1516,6 +1517,21 @@ class Camera2Controller(
             // Apply full photo-capture Noise Reduction & Sharpness regardless of viewport latency mode
             applyNoiseAndEdgeModes(captureBuilder, chars, currentNoiseReduction, currentSharpness, isPreview = false)
 
+            // Enable high-quality ISP color correction & tone mapping when Natural/Vivid profile is active
+            if (colorProfile != ColorProfile.OFF) {
+                val awbMode = captureBuilder.get(CaptureRequest.CONTROL_AWB_MODE)
+                if (awbMode != CaptureRequest.CONTROL_AWB_MODE_OFF) {
+                    captureBuilder.set(
+                        CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+                    )
+                }
+                val availTonemap = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+                if (availTonemap != null && availTonemap.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)) {
+                    captureBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+                }
+            }
+
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
 
             // Correct EXIF orientation for portrait / landscape holding
@@ -1669,8 +1685,11 @@ class Camera2Controller(
         val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
 
         val isFrontCam = currentCharacteristics?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        val shouldMirror = isFrontCam && isMirrorSelfie
+        val shouldApplyColor = colorProfile != ColorProfile.OFF
         var wasReencodedUpright = false
-        val finalBytes = if (isFrontCam && isMirrorSelfie) {
+        var preservedExifOrientation = ExifInterface.ORIENTATION_UNDEFINED
+        val finalBytes = if (shouldMirror || shouldApplyColor) {
             try {
                 val rawExifOrientation = try {
                     ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
@@ -1680,31 +1699,43 @@ class Camera2Controller(
                 } catch (e: Exception) {
                     ExifInterface.ORIENTATION_UNDEFINED
                 }
-                val origBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                preservedExifOrientation = rawExifOrientation
+                val decodeOpts = BitmapFactory.Options().apply {
+                    inMutable = true
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val origBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
                 if (origBitmap != null) {
-                    val rotDeg = when {
-                        rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
-                            rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_180 ||
-                            rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_270 -> exifOrientationToDegrees(rawExifOrientation)
-                        (rawExifOrientation == ExifInterface.ORIENTATION_UNDEFINED || rawExifOrientation == ExifInterface.ORIENTATION_NORMAL) &&
-                            (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
-                            origBitmap.width > origBitmap.height -> lastJpegOrientation.toFloat()
-                        else -> 0f
+                    if (shouldApplyColor) {
+                        NaturalColorProcessor.processBitmapInPlace(origBitmap, colorProfile)
                     }
-                    val matrix = Matrix().apply {
-                        if (rotDeg != 0f) postRotate(rotDeg)
-                        postScale(-1f, 1f)
+                    val outBitmap = if (shouldMirror) {
+                        val rotDeg = when {
+                            rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                                rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_180 ||
+                                rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_270 -> exifOrientationToDegrees(rawExifOrientation)
+                            (rawExifOrientation == ExifInterface.ORIENTATION_UNDEFINED || rawExifOrientation == ExifInterface.ORIENTATION_NORMAL) &&
+                                (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
+                                origBitmap.width > origBitmap.height -> lastJpegOrientation.toFloat()
+                            else -> 0f
+                        }
+                        val matrix = Matrix().apply {
+                            if (rotDeg != 0f) postRotate(rotDeg)
+                            postScale(-1f, 1f)
+                        }
+                        wasReencodedUpright = true
+                        Bitmap.createBitmap(origBitmap, 0, 0, origBitmap.width, origBitmap.height, matrix, true)
+                    } else {
+                        origBitmap
                     }
-                    val mirrored = Bitmap.createBitmap(origBitmap, 0, 0, origBitmap.width, origBitmap.height, matrix, true)
                     val baos = ByteArrayOutputStream()
-                    mirrored.compress(Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+                    outBitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+                    if (outBitmap != origBitmap) outBitmap.recycle()
                     origBitmap.recycle()
-                    if (mirrored != origBitmap) mirrored.recycle()
-                    wasReencodedUpright = true
                     baos.toByteArray()
                 } else bytes
             } catch (e: Exception) {
-                Log.e(TAG, "Mirror selfie processing failed", e)
+                Log.e(TAG, "JPEG color/mirror post-processing failed", e)
                 bytes
             }
         } else {
@@ -1748,10 +1779,15 @@ class Camera2Controller(
             }
 
             val exif = ExifInterface(tempFile.absolutePath)
-            val halOrientation = exif.getAttributeInt(
+            val fileExifOrientation = exif.getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
                 ExifInterface.ORIENTATION_UNDEFINED
             )
+            val halOrientation = if (fileExifOrientation != ExifInterface.ORIENTATION_UNDEFINED) {
+                fileExifOrientation
+            } else {
+                preservedExifOrientation
+            }
             finalExifOrientation = when {
                 wasReencodedUpright -> ExifInterface.ORIENTATION_NORMAL
                 halOrientation == ExifInterface.ORIENTATION_UNDEFINED -> degreesToExifOrientation(lastJpegOrientation)
