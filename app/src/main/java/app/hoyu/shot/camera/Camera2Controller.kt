@@ -105,11 +105,13 @@ class Camera2Controller(
 
     private data class HdrBurstBuffer(
         val id: Long,
+        val exifSnapshot: CaptureExifSnapshot,
         val frames: Array<ByteArray?> = arrayOfNulls(3),
         var receivedCount: Int = 0
     )
     private val hdrLock = Any()
     private val pendingHdrBursts = mutableListOf<HdrBurstBuffer>()
+    private val pendingJpegSnapshots = mutableListOf<CaptureExifSnapshot>()
     private var nextHdrBurstId: Long = 1L
     // Dedicated worker pool for HDR fusion / NaturalColorProcessor / JPEG EXIF saving
     // so CameraBackgroundThread stays free for zero-lag shutter & ImageReader callbacks.
@@ -578,6 +580,8 @@ class Camera2Controller(
                     image.close()
 
                     var hdrCompleteTriple: Triple<ByteArray, ByteArray, ByteArray>? = null
+                    var hdrSnapshot: CaptureExifSnapshot? = null
+                    var singleSnapshot: CaptureExifSnapshot? = null
                     var consumedByHdr = false
                     synchronized(hdrLock) {
                         val burst = pendingHdrBursts.firstOrNull()
@@ -587,23 +591,33 @@ class Camera2Controller(
                             consumedByHdr = true
                             if (burst.receivedCount == 3) {
                                 pendingHdrBursts.removeAt(0)
+                                hdrSnapshot = burst.exifSnapshot
                                 hdrCompleteTriple = Triple(
                                     burst.frames[0]!!,
                                     burst.frames[1]!!,
                                     burst.frames[2]!!
                                 )
                             }
+                        } else if (pendingJpegSnapshots.isNotEmpty()) {
+                            singleSnapshot = pendingJpegSnapshots.removeAt(0)
                         }
                     }
 
                     if (hdrCompleteTriple != null) {
                         val (refBytes, underBytes, overBytes) = hdrCompleteTriple!!
+                        val snap = hdrSnapshot
                         enqueuePostProcess {
-                            saveJpegBytes(refBytes, hdrUnderBytes = underBytes, hdrOverBytes = overBytes)
+                            saveJpegBytes(
+                                refBytes,
+                                hdrUnderBytes = underBytes,
+                                hdrOverBytes = overBytes,
+                                exifSnapshot = snap
+                            )
                         }
                     } else if (!consumedByHdr) {
+                        val snap = singleSnapshot
                         enqueuePostProcess {
-                            saveJpegBytes(bytes)
+                            saveJpegBytes(bytes, exifSnapshot = snap)
                         }
                     }
                 }
@@ -1639,6 +1653,32 @@ class Camera2Controller(
             lastCapturedExposureNanos = null
 
             val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
+            val snapIso = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+                (captureBuilder.get(CaptureRequest.SENSOR_SENSITIVITY) ?: currentIso).coerceAtLeast(1)
+            } else {
+                lastMeasuredIso.coerceAtLeast(1)
+            }
+            val snapFlashFired = currentFlashMode == FlashMode.ON ||
+                currentFlashMode == FlashMode.TORCH ||
+                (currentFlashMode == FlashMode.AUTO && (lastMeasuredIso > 400 || isExposureClamped))
+            val snapEvStep = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
+            val shotSnapshot = CaptureExifSnapshot(
+                captureTimeMs = System.currentTimeMillis(),
+                characteristics = chars,
+                exposureMode = currentExposureMode,
+                iso = snapIso,
+                exposureNanos = effectiveExposureNanos.coerceAtLeast(1L),
+                evIndex = currentEvIndex,
+                evStep = snapEvStep,
+                whiteBalancePreset = currentWbPreset,
+                flashMode = currentFlashMode,
+                flashFired = snapFlashFired,
+                digitalZoomRatio = currentZoomRatio,
+                tapAeActive = currentAeMeteringRect != null,
+                location = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null,
+                isExifSoftwareTagEnabled = isExifSoftwareTagEnabled,
+                deviceJpegOrientation = jpegOrientation
+            )
             var currentHdrBurstId = -1L
             val captureCallback = object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(
@@ -1663,6 +1703,15 @@ class Camera2Controller(
                     super.onCaptureCompleted(session, request, result)
                     result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { if (it > 0) lastCapturedIso = it }
                     result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { if (it > 0L) lastCapturedExposureNanos = it }
+                    if (!useHdrBurst || request.tag == "HDR_REF") {
+                        result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { if (it > 0) shotSnapshot.iso = it }
+                        result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { if (it > 0L) shotSnapshot.exposureNanos = it }
+                        result.get(CaptureResult.FLASH_STATE)?.let { fState ->
+                            if (fState == CaptureResult.FLASH_STATE_FIRED) {
+                                shotSnapshot.flashFired = true
+                            }
+                        }
+                    }
 
                     if (willCaptureRaw && (!useHdrBurst || request.tag == "HDR_REF")) {
                         val ts = result.get(CaptureResult.SENSOR_TIMESTAMP)
@@ -1709,15 +1758,18 @@ class Camera2Controller(
                     super.onCaptureFailed(session, request, failure)
                     if (useHdrBurst && currentHdrBurstId >= 0L) {
                         var refFallback: ByteArray? = null
+                        var snapFallback: CaptureExifSnapshot? = null
                         synchronized(hdrLock) {
                             val idx = pendingHdrBursts.indexOfFirst { it.id == currentHdrBurstId }
                             if (idx >= 0) {
                                 val burst = pendingHdrBursts.removeAt(idx)
                                 refFallback = burst.frames[0]
+                                snapFallback = burst.exifSnapshot
                             }
                         }
                         refFallback?.let { fb ->
-                            enqueuePostProcess { saveJpegBytes(fb) }
+                            val snap = snapFallback
+                            enqueuePostProcess { saveJpegBytes(fb, exifSnapshot = snap) }
                         }
                     }
                     isCapturing = false
@@ -1732,7 +1784,7 @@ class Camera2Controller(
             if (useHdrBurst) {
                 val burstId = synchronized(hdrLock) {
                     val id = nextHdrBurstId++
-                    pendingHdrBursts.add(HdrBurstBuffer(id))
+                    pendingHdrBursts.add(HdrBurstBuffer(id = id, exifSnapshot = shotSnapshot))
                     id
                 }
                 currentHdrBurstId = burstId
@@ -1744,21 +1796,32 @@ class Camera2Controller(
                 )
                 backgroundHandler?.postDelayed({
                     var timedOutRef: ByteArray? = null
+                    var timedOutSnap: CaptureExifSnapshot? = null
                     synchronized(hdrLock) {
                         val idx = pendingHdrBursts.indexOfFirst { it.id == burstId }
                         if (idx >= 0) {
                             val b = pendingHdrBursts.removeAt(idx)
                             timedOutRef = b.frames[0]
+                            timedOutSnap = b.exifSnapshot
                         }
                     }
                     if (timedOutRef != null) {
-                        enqueuePostProcess { saveJpegBytes(timedOutRef!!) }
+                        val snap = timedOutSnap
+                        enqueuePostProcess { saveJpegBytes(timedOutRef!!, exifSnapshot = snap) }
                         isCapturing = false
                         onExposureCompleted?.invoke()
                     }
                 }, 4500L)
                 session.captureBurst(burstRequests, captureCallback, backgroundHandler)
             } else {
+                if (willCaptureJpeg) {
+                    synchronized(hdrLock) {
+                        while (pendingJpegSnapshots.size >= 12) {
+                            pendingJpegSnapshots.removeAt(0)
+                        }
+                        pendingJpegSnapshots.add(shotSnapshot)
+                    }
+                }
                 session.capture(captureBuilder.build(), captureCallback, backgroundHandler)
             }
         } catch (e: Exception) {
@@ -1885,14 +1948,46 @@ class Camera2Controller(
     private fun saveJpegBytes(
         bytes: ByteArray,
         hdrUnderBytes: ByteArray? = null,
-        hdrOverBytes: ByteArray? = null
+        hdrOverBytes: ByteArray? = null,
+        exifSnapshot: CaptureExifSnapshot? = null
     ) {
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+        val snapshot = exifSnapshot ?: CaptureExifSnapshot(
+            captureTimeMs = System.currentTimeMillis(),
+            characteristics = currentCharacteristics,
+            exposureMode = currentExposureMode,
+            iso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) {
+                (lastCapturedIso ?: lastMeasuredIso).coerceAtLeast(1)
+            } else {
+                currentIso.coerceAtLeast(1)
+            },
+            exposureNanos = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) {
+                (lastCapturedExposureNanos ?: lastMeasuredShutter).coerceAtLeast(1L)
+            } else {
+                currentShutterNanos.coerceAtLeast(1L)
+            },
+            evIndex = currentEvIndex,
+            evStep = currentCharacteristics?.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f,
+            whiteBalancePreset = currentWbPreset,
+            flashMode = currentFlashMode,
+            flashFired = currentFlashMode == FlashMode.ON || currentFlashMode == FlashMode.TORCH,
+            digitalZoomRatio = currentZoomRatio,
+            tapAeActive = currentAeMeteringRect != null,
+            location = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null,
+            isExifSoftwareTagEnabled = isExifSoftwareTagEnabled,
+            deviceJpegOrientation = lastJpegOrientation
+        )
+
+        val captureDate = Date(snapshot.captureTimeMs)
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(captureDate)
         val count = photoCounter.incrementAndGet() % 10000
         val fileName = "IMG_${timeStamp}_${String.format(Locale.US, "%04d", count)}.jpg"
-        val loc = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null
+        val loc = snapshot.location
 
-        val isFrontCam = currentCharacteristics?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        // Extract ALL HAL EXIF tags BEFORE any Bitmap re-encoding strips APP1!
+        val halExifTags = JpegExifHelper.extractHalExif(bytes)
+
+        val chars = snapshot.characteristics
+        val isFrontCam = chars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
         val shouldMirror = isFrontCam && isMirrorSelfie
         val shouldApplyColor = colorProfile != ColorProfile.OFF
         val shouldApplyHdr = hdrUnderBytes != null && hdrOverBytes != null
@@ -1927,8 +2022,8 @@ class Camera2Controller(
                                 rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_180 ||
                                 rawExifOrientation == ExifInterface.ORIENTATION_ROTATE_270 -> exifOrientationToDegrees(rawExifOrientation)
                             (rawExifOrientation == ExifInterface.ORIENTATION_UNDEFINED || rawExifOrientation == ExifInterface.ORIENTATION_NORMAL) &&
-                                (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
-                                origBitmap.width > origBitmap.height -> lastJpegOrientation.toFloat()
+                                (snapshot.deviceJpegOrientation == 90 || snapshot.deviceJpegOrientation == 270) &&
+                                origBitmap.width > origBitmap.height -> snapshot.deviceJpegOrientation.toFloat()
                             else -> 0f
                         }
                         val matrix = Matrix().apply {
@@ -1960,23 +2055,14 @@ class Camera2Controller(
         var imgHeight = 3000
         var finalExifOrientation = ExifInterface.ORIENTATION_NORMAL
 
-        val chars = currentCharacteristics
         val apertures = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
         val apertureFloat = apertures?.firstOrNull()?.takeIf { it > 0f } ?: 1.8f
         val ap = String.format(Locale.US, "f/%.1f", apertureFloat)
         val focalArr = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
         val focalFloat = focalArr?.firstOrNull()?.takeIf { it > 0f } ?: 5.0f
         val focalStr = String.format(Locale.US, "%.1fmm", focalFloat)
-        val effectiveIso = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.SHUTTER_PRIORITY) {
-            (lastCapturedIso ?: lastMeasuredIso).coerceAtLeast(1)
-        } else {
-            currentIso.coerceAtLeast(1)
-        }
-        val effectiveExposureNanos = if (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.ISO_PRIORITY) {
-            (lastCapturedExposureNanos ?: lastMeasuredShutter).coerceAtLeast(1L)
-        } else {
-            currentShutterNanos.coerceAtLeast(1L)
-        }
+        val effectiveIso = snapshot.iso.coerceAtLeast(1)
+        val effectiveExposureNanos = snapshot.exposureNanos.coerceAtLeast(1L)
 
         try {
             tempFile.outputStream().use { fos ->
@@ -2002,74 +2088,21 @@ class Camera2Controller(
             }
             finalExifOrientation = when {
                 wasReencodedUpright -> ExifInterface.ORIENTATION_NORMAL
-                halOrientation == ExifInterface.ORIENTATION_UNDEFINED -> degreesToExifOrientation(lastJpegOrientation)
+                halOrientation == ExifInterface.ORIENTATION_UNDEFINED -> degreesToExifOrientation(snapshot.deviceJpegOrientation)
                 halOrientation == ExifInterface.ORIENTATION_NORMAL &&
-                    (lastJpegOrientation == 90 || lastJpegOrientation == 270) &&
-                    imgWidth > imgHeight -> degreesToExifOrientation(lastJpegOrientation)
+                    (snapshot.deviceJpegOrientation == 90 || snapshot.deviceJpegOrientation == 270) &&
+                    imgWidth > imgHeight -> degreesToExifOrientation(snapshot.deviceJpegOrientation)
                 else -> halOrientation
             }
 
-            if (loc != null) {
-                exif.setGpsInfo(loc)
-                val latRef = if (loc.latitude >= 0) "N" else "S"
-                val lonRef = if (loc.longitude >= 0) "E" else "W"
-                exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, latRef)
-                exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, lonRef)
-                exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, loc.provider ?: "GPS")
-            }
-            exif.setAttribute(ExifInterface.TAG_ORIENTATION, finalExifOrientation.toString())
-            val makeName = Build.MANUFACTURER.replaceFirstChar {
-                if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString()
-            }
-            if (makeName.isNotBlank()) {
-                exif.setAttribute(ExifInterface.TAG_MAKE, makeName)
-            }
-            if (!Build.MODEL.isNullOrBlank()) {
-                exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
-            }
-            if (isExifSoftwareTagEnabled) {
-                exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Hoyuuna HoyuShot")
-            }
-
-            // Fill standard exposure / lens tags if Camera2 HAL omitted them in JPEG APP1
-            val existingIso = exif.getAttributeInt(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, 0)
-                .takeIf { it > 0 }
-                ?: exif.getAttributeInt(ExifInterface.TAG_ISO_SPEED_RATINGS, 0)
-            if (existingIso <= 0) {
-                exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, effectiveIso.toString())
-            }
-            if (exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0) <= 0.0) {
-                exif.setAttribute(
-                    ExifInterface.TAG_EXPOSURE_TIME,
-                    String.format(Locale.US, "%.6f", effectiveExposureNanos / 1_000_000_000.0)
-                )
-            }
-            if (exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0) <= 0.0) {
-                exif.setAttribute(ExifInterface.TAG_F_NUMBER, String.format(Locale.US, "%.2f", apertureFloat))
-            }
-            if (exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0) <= 0.0) {
-                exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, String.format(Locale.US, "%.2f", focalFloat))
-            }
-            if (exif.getAttribute(ExifInterface.TAG_LENS_MAKE).isNullOrBlank() && makeName.isNotBlank()) {
-                exif.setAttribute(ExifInterface.TAG_LENS_MAKE, makeName)
-            }
-            if (exif.getAttribute(ExifInterface.TAG_LENS_MODEL).isNullOrBlank()) {
-                val facingLabel = when (chars?.get(CameraCharacteristics.LENS_FACING)) {
-                    CameraCharacteristics.LENS_FACING_FRONT -> "Front"
-                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "External"
-                    else -> "Rear"
-                }
-                val lensModel = listOfNotNull(
-                    makeName.takeIf { it.isNotBlank() },
-                    Build.MODEL?.takeIf { it.isNotBlank() },
-                    facingLabel,
-                    focalStr,
-                    ap
-                ).joinToString(" ")
-                if (lensModel.isNotBlank()) {
-                    exif.setAttribute(ExifInterface.TAG_LENS_MODEL, lensModel)
-                }
-            }
+            JpegExifHelper.writeCompleteExif(
+                exif = exif,
+                halTags = halExifTags,
+                snapshot = snapshot,
+                imgWidth = imgWidth,
+                imgHeight = imgHeight,
+                finalOrientation = finalExifOrientation
+            )
             exif.saveAttributes()
 
             if (imgWidth <= 0 || imgHeight <= 0) {
@@ -2080,10 +2113,11 @@ class Camera2Controller(
             Log.e(TAG, "Failed to write EXIF to temp file", e)
         }
 
-        // 2. Stream byte-complete JPEG (with valid EXIF GPS) directly into MediaStore
+        // 2. Stream byte-complete JPEG (with valid EXIF GPS & metadata) directly into MediaStore
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_TAKEN, snapshot.captureTimeMs)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
             } else if (loc != null) {
@@ -2193,6 +2227,7 @@ class Camera2Controller(
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
+            put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/HoyuShot")
             } else if (loc != null) {
