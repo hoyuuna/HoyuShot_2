@@ -57,23 +57,31 @@ object NaturalColorProcessor {
         val spread = (p98 - p02).coerceAtLeast(1)
 
         // 2. Build adaptive monotonic Filmic S-Curve LUT
-        val blackAnchor = if (p02 > 6) ((p02 - 5f) * 0.42f).coerceIn(0f, 16f) else 0f
+        val blackAnchor = when (profile) {
+            ColorProfile.NATURAL -> 0f
+            ColorProfile.VIVID -> if (p02 > 8) ((p02 - 6f) * 0.25f).coerceIn(0f, 10f) else 0f
+            ColorProfile.OFF -> 0f
+        }
         val flatness = ((200f - spread) / 115f).coerceIn(0f, 1f)
 
         val sCurveAlpha = when (profile) {
-            ColorProfile.NATURAL -> 0.062f + 0.036f * flatness
-            ColorProfile.VIVID -> 0.095f + 0.042f * flatness
+            ColorProfile.NATURAL -> 0.016f + 0.008f * flatness
+            ColorProfile.VIVID -> 0.050f + 0.030f * flatness
             ColorProfile.OFF -> 0f
         }
-        val shadowLift = if (p50 < 95) ((95f - p50) / 95f) * 0.045f else 0f
+        val shadowLift = when (profile) {
+            ColorProfile.NATURAL -> 0.035f + (if (p50 < 110) ((110f - p50) / 110f) * 0.040f else 0f)
+            ColorProfile.VIVID -> if (p50 < 95) ((95f - p50) / 95f) * 0.040f else 0f
+            ColorProfile.OFF -> 0f
+        }
         val vibranceStrength = when (profile) {
-            ColorProfile.NATURAL -> 0.24f + 0.08f * flatness
-            ColorProfile.VIVID -> 0.42f + 0.10f * flatness
+            ColorProfile.NATURAL -> 0.08f + 0.04f * flatness
+            ColorProfile.VIVID -> 0.38f + 0.10f * flatness
             ColorProfile.OFF -> 0f
         }
         val clarityStrength = when (profile) {
-            ColorProfile.NATURAL -> 0.14f
-            ColorProfile.VIVID -> 0.22f
+            ColorProfile.NATURAL -> 0f
+            ColorProfile.VIVID -> 0.08f
             ColorProfile.OFF -> 0f
         }
 
@@ -86,6 +94,18 @@ object NaturalColorProcessor {
             val lifted = (x + shadowLift * (1f - x) * (1f - x) * x * 4f).coerceIn(0f, 1f)
             val curved = (lifted - sCurveAlpha * sin(2.0 * PI * lifted).toFloat()).coerceIn(0f, 1f)
             lumaLut[i] = curved * 255f
+        }
+
+        // Fast path: bypass micro-contrast clarity filter if strength is 0 (Natural profile)
+        if (clarityStrength <= 0.001f) {
+            val lineBuffer = IntArray(width)
+            val dummyY = FloatArray(width)
+            for (y in 0 until height) {
+                bitmap.getPixels(lineBuffer, 0, width, 0, y, width, 1)
+                applyToneAndVibranceRow(lineBuffer, dummyY, width, lumaLut, vibranceStrength)
+                bitmap.setPixels(lineBuffer, 0, width, 0, y, width, 1)
+            }
+            return
         }
 
         // 3. Stream rows: Tone LUT + Selective Vibrance (skin-protected) + 3-row Luma Clarity
