@@ -246,7 +246,7 @@ fun AdvancedSettingsDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A))
                     ) {
                         Text(
-                            text = "CHECK SENSOR DETAILS & TIERS  →",
+                            text = "CHECK SENSOR DETAILS & TIERS",
                             color = Color(0xFFFAFAFA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,

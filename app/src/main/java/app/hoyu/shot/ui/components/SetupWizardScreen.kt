@@ -2,6 +2,7 @@ package app.hoyu.shot.ui.components
 
 import android.os.Build
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,15 +41,27 @@ fun SetupWizardScreen(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    val shape = RoundedCornerShape(2.dp)
 
     var currentStep by remember { mutableIntStateOf(initialStep.coerceIn(0, 2)) }
-    val scrollState = rememberScrollState()
 
     // Inspect hardware dynamically when reaching step 2 or on demand
     val inspector = remember { CameraHardwareInspector(context) }
     var discoveredLenses by remember { mutableStateOf<List<LensItem>>(emptyList()) }
     var primaryCapabilities by remember { mutableStateOf<HardwareCapabilities?>(null) }
+
+    val fullVersionName = remember(context) {
+        try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            pInfo.versionName ?: "1.0.0"
+        } catch (e: Exception) {
+            "1.0.0"
+        }
+    }
 
     LaunchedEffect(currentStep, isCameraGranted) {
         if (currentStep == 2 && isCameraGranted) {
@@ -61,7 +74,6 @@ fun SetupWizardScreen(
                 val targetId = primaryBack?.cameraId ?: "0"
                 primaryCapabilities = inspector.inspectCamera(targetId)
             } catch (e: Exception) {
-                // Fallback safe probe
                 primaryCapabilities = inspector.inspectCamera("0")
             }
         }
@@ -115,14 +127,26 @@ fun SetupWizardScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Body Content based on currentStep
-            Box(
+            // Animated Body Content between steps
+            AnimatedContent(
+                targetState = currentStep,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInHorizontally(animationSpec = tween(300)) { fullWidth -> fullWidth } + fadeIn(animationSpec = tween(300)))
+                            .togetherWith(slideOutHorizontally(animationSpec = tween(300)) { fullWidth -> -fullWidth / 2 } + fadeOut(animationSpec = tween(250)))
+                    } else {
+                        (slideInHorizontally(animationSpec = tween(300)) { fullWidth -> -fullWidth } + fadeIn(animationSpec = tween(300)))
+                            .togetherWith(slideOutHorizontally(animationSpec = tween(300)) { fullWidth -> fullWidth / 2 } + fadeOut(animationSpec = tween(250)))
+                    }
+                },
+                label = "SetupWizardStepTransition",
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-            ) {
-                when (currentStep) {
+            ) { step ->
+                when (step) {
                     0 -> WelcomePage(
+                        versionName = fullVersionName,
                         onNext = {
                             view.triggerUiHaptic(true)
                             currentStep = 1
@@ -167,23 +191,26 @@ fun SetupWizardScreen(
 @Composable
 private fun StepPill(step: Int, active: Boolean, completed: Boolean) {
     val shape = RoundedCornerShape(2.dp)
-    val bgColor = when {
+    val targetBgColor = when {
         active -> Color(0xFFE11D48)
         completed -> Color(0xFF10B981)
         else -> Color(0xFF18181B)
     }
-    val textColor = if (active || completed) Color.White else Color(0xFF71717A)
+    val targetTextColor = if (active || completed) Color.White else Color(0xFF71717A)
+
+    val animatedBgColor by animateColorAsState(targetValue = targetBgColor, animationSpec = tween(250), label = "pillBg")
+    val animatedTextColor by animateColorAsState(targetValue = targetTextColor, animationSpec = tween(250), label = "pillText")
 
     Box(
         modifier = Modifier
             .clip(shape)
-            .background(bgColor)
+            .background(animatedBgColor)
             .border(1.dp, if (active) Color(0xFFE11D48) else Color(0xFF27272A), shape)
             .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
         Text(
             text = "0$step",
-            color = textColor,
+            color = animatedTextColor,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
@@ -195,7 +222,10 @@ private fun StepPill(step: Int, active: Boolean, completed: Boolean) {
 // STEP 1: WELCOME PAGE
 // ==========================================
 @Composable
-private fun WelcomePage(onNext: () -> Unit) {
+private fun WelcomePage(
+    versionName: String,
+    onNext: () -> Unit
+) {
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
@@ -222,7 +252,7 @@ private fun WelcomePage(onNext: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "VERSION 1.0 // DSLR ENGINE",
+                        text = "v$versionName // DSLR ENGINE",
                         color = Color(0xFFE11D48),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
@@ -293,7 +323,7 @@ private fun WelcomePage(onNext: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Next Button
+        // Next Button (Clean single-line without arrow)
         Button(
             onClick = onNext,
             modifier = Modifier
@@ -303,7 +333,7 @@ private fun WelcomePage(onNext: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
         ) {
             Text(
-                text = "START SETUP // PROCEED  →",
+                text = "START SETUP",
                 color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black,
@@ -484,7 +514,7 @@ private fun PermissionsPage(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Action Buttons Row
+        // Action Buttons Row (Clean single-line without arrows)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -499,7 +529,7 @@ private fun PermissionsPage(
                 border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
             ) {
                 Text(
-                    text = "← BACK",
+                    text = "BACK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -520,7 +550,7 @@ private fun PermissionsPage(
                 )
             ) {
                 Text(
-                    text = "PROCEED  →",
+                    text = "PROCEED",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
@@ -620,7 +650,7 @@ private fun PermissionCard(
 }
 
 // ==========================================
-// STEP 3: HARDWARE AUDIT PAGE
+// STEP 3: HARDWARE COMPATIBILITY PAGE
 // ==========================================
 @Composable
 private fun HardwareAuditPage(
@@ -801,7 +831,7 @@ private fun HardwareAuditPage(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Action Buttons Row
+        // Action Buttons Row (Clean single-line without arrows)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -816,7 +846,7 @@ private fun HardwareAuditPage(
                 border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
             ) {
                 Text(
-                    text = "← BACK",
+                    text = "BACK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -832,9 +862,9 @@ private fun HardwareAuditPage(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
             ) {
                 Text(
-                    text = "COMPLETE & LAUNCH VIEWFINDER  →",
+                    text = "COMPLETE",
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
                 )
