@@ -16,6 +16,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -60,6 +66,17 @@ fun SettingsDialog(
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
+    // 8-second auto-close timer starting from the exact moment user lifts finger off the popup
+    var isFingerTouching by remember { mutableStateOf(false) }
+    var touchReleaseEpoch by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(touchReleaseEpoch, isFingerTouching, visible) {
+        if (visible && !isFingerTouching) {
+            delay(8000)
+            onDismiss()
+        }
+    }
+
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
@@ -73,7 +90,22 @@ fun SettingsDialog(
             contentAlignment = Alignment.Center
         ) {
             Box(
-                modifier = Modifier.rotateBounds(rotationDegrees),
+                modifier = Modifier
+                    .rotateBounds(rotationDegrees)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                val touching = event.changes.any { it.pressed }
+                                if (touching != isFingerTouching) {
+                                    isFingerTouching = touching
+                                    if (!touching) {
+                                        touchReleaseEpoch = System.currentTimeMillis()
+                                    }
+                                }
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
             PopupGlassContainer(
@@ -113,7 +145,10 @@ fun SettingsDialog(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier
-                            .clickable { onDismiss() }
+                            .clickable {
+                                view.triggerUiHaptic(uiHapticsEnabled)
+                                onDismiss()
+                            }
                             .padding(4.dp)
                     )
                 }
@@ -206,7 +241,7 @@ fun SettingsDialog(
                         Text(
                             text = when (uiState.noiseReductionMode) {
                                 NoiseReductionMode.OFF -> "OFF"
-                                NoiseReductionMode.FAST -> "MIN"
+                                NoiseReductionMode.FAST -> "FAST"
                                 NoiseReductionMode.HIGH_QUALITY -> "HQ"
                             },
                             color = if (isNrActive) Color(0xFFE11D48) else Color(0xFF71717A),

@@ -133,7 +133,10 @@ fun FormatMenu(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier
-                            .clickable { onDismiss() }
+                            .clickable {
+                                view.triggerUiHaptic(uiHapticsEnabled)
+                                onDismiss()
+                            }
                             .padding(4.dp)
                     )
                 }

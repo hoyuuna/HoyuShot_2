@@ -289,7 +289,10 @@ fun CameraScreen(
                         uiState = uiState,
                         animatedRotation = animatedRotation,
                         shape = shape,
-                        onOpenSettings = { isSettingsDialogVisible = true },
+                        onOpenSettings = {
+                    view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
+                    isSettingsDialogVisible = true
+                },
                         onToggleAeLock = { viewModel.toggleAeLock() },
                         onChangeRatio = {
                             val next = when (uiState.aspectRatio) {
@@ -419,7 +422,10 @@ fun CameraScreen(
                             uiState = uiState,
                             animatedRotation = animatedRotation,
                             shape = shape,
-                            onOpenSettings = { isSettingsDialogVisible = true },
+                            onOpenSettings = {
+                    view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
+                    isSettingsDialogVisible = true
+                },
                             onToggleAeLock = { viewModel.toggleAeLock() },
                             onChangeRatio = {
                                 val next = when (uiState.aspectRatio) {
@@ -1617,6 +1623,8 @@ private fun ShadcnIconButton(
     rotationDegrees: Float = 0f,
     onClick: () -> Unit
 ) {
+    val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     Box(
         modifier = Modifier
@@ -1624,7 +1632,10 @@ private fun ShadcnIconButton(
             .clip(shape)
             .background(if (isActive) Color(0xFFFAFAFA) else Color(0x33000000))
             .border(1.dp, if (isActive) Color(0xFFFAFAFA) else Color(0xFF27272A), shape)
-            .clickable { onClick() },
+            .clickable {
+                view.triggerUiHaptic(uiHapticsEnabled)
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -1645,6 +1656,8 @@ private fun ShadcnTextButton(
     rotationDegrees: Float = 0f,
     onClick: () -> Unit
 ) {
+    val view = LocalView.current
+    val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     Box(
         modifier = Modifier
@@ -1652,7 +1665,10 @@ private fun ShadcnTextButton(
             .clip(shape)
             .background(if (isActive) Color(0xFFFAFAFA) else Color(0x33000000))
             .border(1.dp, if (isActive) Color(0xFFFAFAFA) else Color(0xFF27272A), shape)
-            .clickable { onClick() },
+            .clickable {
+                view.triggerUiHaptic(uiHapticsEnabled)
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(

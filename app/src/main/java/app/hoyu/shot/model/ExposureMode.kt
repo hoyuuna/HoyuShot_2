@@ -51,7 +51,7 @@ enum class TimerMode(val seconds: Int, val label: String) {
 
 enum class NoiseReductionMode(val label: String, val tag: String) {
     OFF("OFF", "NR OFF"),
-    FAST("MIN", "NR MIN"),
+    FAST("FAST", "NR FAST"),
     HIGH_QUALITY("HQ", "NR HQ")
 }
 
