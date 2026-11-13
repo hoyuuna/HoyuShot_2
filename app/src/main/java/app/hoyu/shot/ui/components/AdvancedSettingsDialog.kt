@@ -188,51 +188,21 @@ fun AdvancedSettingsDialog(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "HARDWARE COMPATIBILITY",
-                                color = Color(0xFFFAFAFA),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = "SENSOR ID: ${uiState.currentCameraId} • ${levelInfo.title}",
-                                color = Color(0xFF71717A),
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(shape)
-                                .background(levelInfo.badgeColor.copy(alpha = 0.15f))
-                                .border(1.dp, levelInfo.badgeColor, shape)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = if (levelInfo.isFullySupported) "FULL SUPPORT" else "RESTRICTED",
-                                color = levelInfo.badgeColor,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "HARDWARE COMPATIBILITY",
+                            color = Color(0xFFFAFAFA),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "SENSOR ID: ${uiState.currentCameraId} • ${levelInfo.title}",
+                            color = Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
-
-                    Text(
-                        text = levelInfo.summary,
-                        color = if (levelInfo.isFullySupported) Color(0xFF10B981) else Color(0xFFF59E0B),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
 
                     Button(
                         onClick = {
