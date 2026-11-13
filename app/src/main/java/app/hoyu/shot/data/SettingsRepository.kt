@@ -23,6 +23,10 @@ class SettingsRepository(context: Context) {
         get() = true
         set(_) {}
 
+    var isSetupCompleted: Boolean
+        get() = prefs.getBoolean("is_setup_completed", false)
+        set(value) = prefs.edit().putBoolean("is_setup_completed", value).apply()
+
     var savedCameraId: String
         get() = prefs.getString("saved_camera_id", "0") ?: "0"
         set(value) = prefs.edit().putString("saved_camera_id", value).apply()

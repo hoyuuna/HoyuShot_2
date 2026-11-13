@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.hoyu.shot.model.Camera2LevelExplainer
 import app.hoyu.shot.model.CameraUiState
 import app.hoyu.shot.updater.UpdateCheckResult
 import app.hoyu.shot.updater.UpdateManager
@@ -71,6 +72,7 @@ fun AdvancedSettingsDialog(
     var downloadProgress by remember { mutableStateOf<Int?>(null) }
     var downloadProgressText by remember { mutableStateOf("") }
     var downloadedApkFile by remember { mutableStateOf<File?>(null) }
+    var isHardwareLevelDialogVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(visible, scrollToUpdates) {
         if (visible && scrollToUpdates) {
@@ -711,6 +713,98 @@ fun AdvancedSettingsDialog(
                     onToggle = onTogglePreReleaseUpdate
                 )
 
+                // ==========================================
+                // SECTION 5: CAMERA2 HARDWARE LEVEL & AUDIT
+                // ==========================================
+                SectionHeader("05 // CAMERA2 HARDWARE DIAGNOSTICS")
+
+                val hwLevelName = uiState.capabilities?.hardwareLevelName ?: "UNKNOWN"
+                val levelInfo = remember(hwLevelName) { Camera2LevelExplainer.getLevelInfo(hwLevelName) }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF18181B))
+                        .border(1.dp, Color(0xFF27272A), shape)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "CAMERA2 HARDWARE LEVEL",
+                                color = Color(0xFFFAFAFA),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "SENSOR ID: ${uiState.currentCameraId} • ${levelInfo.title}",
+                                color = Color(0xFF71717A),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(shape)
+                                .background(levelInfo.badgeColor.copy(alpha = 0.15f))
+                                .border(1.dp, levelInfo.badgeColor, shape)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (levelInfo.isFullySupported) "ĐỦ TÍNH NĂNG" else "HẠN CHẾ",
+                                color = levelInfo.badgeColor,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = levelInfo.summary,
+                        color = if (levelInfo.isFullySupported) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Text(
+                        text = levelInfo.detailedExplanation,
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Button(
+                        onClick = {
+                            view.triggerUiHaptic(uiHapticsEnabled)
+                            isHardwareLevelDialogVisible = true
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(36.dp),
+                        shape = shape,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A))
+                    ) {
+                        Text(
+                            text = "XEM GIẢI THÍCH CHI TIẾT CÁC LEVEL  →",
+                            color = Color(0xFFFAFAFA),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Footer exactly as requested
@@ -724,6 +818,16 @@ fun AdvancedSettingsDialog(
             }
             }
         }
+    }
+
+    if (isHardwareLevelDialogVisible) {
+        CameraHardwareLevelDialog(
+            visible = isHardwareLevelDialogVisible,
+            capabilities = uiState.capabilities,
+            availableLenses = uiState.availableLenses,
+            currentCameraId = uiState.currentCameraId,
+            onDismiss = { isHardwareLevelDialogVisible = false }
+        )
     }
 }
 
