@@ -263,7 +263,7 @@ private fun WelcomePage(onNext: () -> Unit) {
                 }
 
                 Text(
-                    text = "Hệ thống máy ảnh chuyên nghiệp thủ công dành cho Android, kết nối trực tiếp cảm biến phần cứng qua Camera2 API.",
+                    text = "Professional manual DSLR camera system for Android, providing direct hardware control over optical sensors.",
                     color = Color(0xFFA1A1AA),
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
@@ -274,20 +274,20 @@ private fun WelcomePage(onNext: () -> Unit) {
             // Highlights
             HighlightCard(
                 tag = "01 // SENSOR DIRECT CONTROL",
-                title = "TAM GIÁC PHƠI SÁNG ĐỘC LẬP",
-                description = "Chỉnh tay tốc độ màn trập (SEC) từ 1/8000s đến 30s, ISO từ 50 đến 6400+, lấy nét thủ công quang học (Diopter MF) và White Balance Kelvin."
+                title = "INDEPENDENT EXPOSURE TRIANGLE",
+                description = "Granular nanosecond shutter speed (SEC) from 1/8000s to 30s, ISO gain from 50 to 6400+, optical diopter manual focus, and Kelvin white balance."
             )
 
             HighlightCard(
                 tag = "02 // UNCOMPRESSED RAW & CALIBRATION",
-                title = "XUẤT ẢNH RAW DNG 12-BIT",
-                description = "Thu nhận dữ liệu ánh sáng thô nguyên bản kết hợp bộ lọc Natural Color Engine trung thực, giữ trọn chi tiết vùng tối và vùng sáng."
+                title = "12-BIT RAW DNG CAPTURE",
+                description = "Acquire uncompressed raw sensor data alongside calibrated Natural and Vivid photographic color engines with skin-tone protection."
             )
 
             HighlightCard(
                 tag = "03 // PROFESSIONAL METRICS",
-                title = "KÍNH NGẮM VÀ CÔNG CỤ ĐO QUANG",
-                description = "Biểu đồ Histogram đa kênh thời gian thực, thước đo cân bằng Horizon Level 2 trục, Spot AE điểm đo sáng độc lập và chống sọc quét Antibanding."
+                title = "VIEWFINDER & SCOPES",
+                description = "Real-time multi-channel RGB/Luma histogram, dual-axis horizon level indicator, independent Spot AE metering, and antibanding filter."
             )
         }
 
@@ -303,7 +303,7 @@ private fun WelcomePage(onNext: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
         ) {
             Text(
-                text = "BẮT ĐẦU THIẾT LẬP // TIẾP TỤC  →",
+                text = "START SETUP // PROCEED  →",
                 color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black,
@@ -376,23 +376,23 @@ private fun PermissionsPage(
             // Header Description
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "02 // PHÂN QUYỀN HỆ THỐNG",
+                    text = "02 // SYSTEM PERMISSIONS",
                     color = Color(0xFFFAFAFA),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = "Cấp quyền truy cập để ứng dụng kết nối trực tiếp với cảm biến phần cứng của thiết bị.",
+                    text = "Grant system permissions to interface directly with device hardware sensors.",
                     color = Color(0xFFA1A1AA),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
 
-            // SECTION A: BẮT BUỘC (REQUIRED)
+            // SECTION A: REQUIRED
             Text(
-                text = "MỤC BẮT BUỘC // REQUIRED (PHẢI BẬT ĐỂ TIẾP TỤC)",
+                text = "REQUIRED PERMISSIONS (MUST BE GRANTED TO PROCEED)",
                 color = Color(0xFFE11D48),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
@@ -401,18 +401,18 @@ private fun PermissionsPage(
             )
 
             PermissionCard(
-                title = "MÁY ẢNH (CAMERA SENSOR)",
+                title = "CAMERA SENSOR ACCESS",
                 systemPermission = "android.permission.CAMERA",
-                description = "Quyền truy cập trực tiếp cảm biến quang học và kính ngắm DSLR. Bắt buộc phải có để vận hành ứng dụng.",
+                description = "Direct access to optical sensors and real-time DSLR viewfinder stream. Required to operate the camera.",
                 isRequired = true,
                 isGranted = isCameraGranted,
-                actionLabel = "CẤP QUYỀN CAMERA",
+                actionLabel = "GRANT CAMERA PERMISSION",
                 onAction = onRequestCamera
             )
 
-            // SECTION B: TÙY CHỌN (OPTIONAL)
+            // SECTION B: OPTIONAL
             Text(
-                text = "MỤC TÙY CHỌN // OPTIONAL (CÓ THỂ BỎ QUA)",
+                text = "OPTIONAL PERMISSIONS (CAN BE SKIPPED)",
                 color = Color(0xFFA1A1AA),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
@@ -421,23 +421,23 @@ private fun PermissionsPage(
             )
 
             PermissionCard(
-                title = "VỊ TRÍ ĐỊA LÝ (GPS LOCATION)",
+                title = "GEOGRAPHIC LOCATION (GPS)",
                 systemPermission = "android.permission.ACCESS_FINE_LOCATION",
-                description = "Ghi tọa độ địa lý WGS84 vào thẻ EXIF của ảnh và cung cấp tính năng La bàn Mặt Trời (Sun Compass) theo dõi hướng nắng.",
+                description = "Embeds WGS84 coordinates into EXIF photo metadata and enables real-time Sun Compass solar tracking.",
                 isRequired = false,
                 isGranted = isLocationGranted,
-                actionLabel = "BẬT VỊ TRÍ",
+                actionLabel = "ENABLE LOCATION",
                 onAction = onRequestLocation
             )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 PermissionCard(
-                    title = "THÔNG BÁO CẬP NHẬT (UPDATE ALERTS)",
+                    title = "SYSTEM NOTIFICATIONS",
                     systemPermission = "android.permission.POST_NOTIFICATIONS",
-                    description = "Nhận thông báo khi có phiên bản cập nhật tính năng mới của HoyuShot từ GitHub.",
+                    description = "Receive release alerts when new HoyuShot builds are available on GitHub.",
                     isRequired = false,
                     isGranted = isNotificationGranted,
-                    actionLabel = "BẬT THÔNG BÁO",
+                    actionLabel = "ENABLE NOTIFICATIONS",
                     onAction = onRequestNotification
                 )
             }
@@ -453,7 +453,7 @@ private fun PermissionsPage(
                         .padding(10.dp)
                 ) {
                     Text(
-                        text = "⚠ LƯU Ý: Quyền Máy ảnh là bắt buộc. Bạn phải cấp quyền Máy ảnh mới được phép tiếp tục sang bước kiểm tra phần cứng.",
+                        text = "⚠ ATTENTION: Camera permission is required. You must grant Camera access to proceed to the hardware audit.",
                         color = Color(0xFFEF4444),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -471,7 +471,7 @@ private fun PermissionsPage(
                         .padding(10.dp)
                 ) {
                     Text(
-                        text = "✓ Quyền Máy ảnh đã được kích hoạt. Nhấn 'TIẾP TỤC' để kiểm tra cấp độ hỗ trợ Camera2 của thiết bị.",
+                        text = "✓ Camera sensor access is active. Click 'PROCEED' to inspect device hardware capabilities.",
                         color = Color(0xFF10B981),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -499,7 +499,7 @@ private fun PermissionsPage(
                 border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
             ) {
                 Text(
-                    text = "← QUAY LẠI",
+                    text = "← BACK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -520,7 +520,7 @@ private fun PermissionsPage(
                 )
             ) {
                 Text(
-                    text = "TIẾP TỤC  →",
+                    text = "PROCEED  →",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
@@ -579,7 +579,7 @@ private fun PermissionCard(
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = if (isGranted) "✓ ĐÃ CẤP" else (if (isRequired) "BẮT BUỘC" else "TÙY CHỌN"),
+                    text = if (isGranted) "✓ GRANTED" else (if (isRequired) "REQUIRED" else "OPTIONAL"),
                     color = if (isGranted) Color(0xFF10B981) else (if (isRequired) Color(0xFFE11D48) else Color(0xFFA1A1AA)),
                     fontSize = 8.sp,
                     fontWeight = FontWeight.Black,
@@ -645,14 +645,14 @@ private fun HardwareAuditPage(
             // Header Description
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "03 // KIỂM TRA PHẦN CỨNG CAMERA",
+                    text = "03 // HARDWARE COMPATIBILITY",
                     color = Color(0xFFFAFAFA),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = "Thiết bị: ${Build.MANUFACTURER.uppercase()} ${Build.MODEL.uppercase()} (Android ${Build.VERSION.RELEASE})",
+                    text = "DEVICE: ${Build.MANUFACTURER.uppercase()} ${Build.MODEL.uppercase()} (ANDROID ${Build.VERSION.RELEASE})",
                     color = Color(0xFF71717A),
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace
@@ -675,7 +675,7 @@ private fun HardwareAuditPage(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "CAMERA2 HARDWARE LEVEL",
+                        text = "HARDWARE SUPPORT LEVEL",
                         color = Color(0xFFA1A1AA),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
@@ -690,7 +690,7 @@ private fun HardwareAuditPage(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (levelInfo.isFullySupported) "ĐỦ TÍNH NĂNG" else "HẠN CHẾ",
+                            text = if (levelInfo.isFullySupported) "FULL SUPPORT" else "RESTRICTED",
                             color = levelInfo.badgeColor,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Black,
@@ -737,7 +737,7 @@ private fun HardwareAuditPage(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "BẢNG NĂNG LỰC CẢM BIẾN (CAPABILITIES)",
+                    text = "SENSOR CAPABILITIES",
                     color = Color(0xFFE11D48),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Black,
@@ -745,27 +745,27 @@ private fun HardwareAuditPage(
                 )
 
                 AuditChecklistRow(
-                    label = "CHỈNH TAY THỦ CÔNG (MANUAL SENSOR)",
+                    label = "MANUAL SENSOR (ISO / SEC)",
                     isSupported = capabilities?.supportsManualSensor == true,
-                    note = "Tốc độ màn trập SEC & Độ nhạy ISO độc lập"
+                    note = "Independent shutter duration & sensor sensitivity"
                 )
 
                 AuditChecklistRow(
-                    label = "XUẤT ẢNH NGUYÊN BẢN (RAW DNG)",
+                    label = "RAW SENSOR STREAM (RAW DNG)",
                     isSupported = capabilities?.supportsRawCapture == true,
-                    note = "Dữ liệu cảm biến thô 10/12-bit không nén"
+                    note = "10/12-bit uncompressed sensor data recording"
                 )
 
                 AuditChecklistRow(
-                    label = "LẤY NÉT QUANG HỌC (MF DIOPTER)",
+                    label = "OPTICAL MANUAL FOCUS (MF DIOPTER)",
                     isSupported = (capabilities?.minFocusDistanceDiopters ?: 0f) > 0f,
-                    note = "Khoảng cách lấy nét thủ công theo diopter quang"
+                    note = "Physical lens diopter distance override"
                 )
 
                 AuditChecklistRow(
-                    label = "KHÓA CÂN BẰNG TRẮNG (AWB LOCK)",
+                    label = "MANUAL AWB & COLOR MATRIX",
                     isSupported = capabilities?.supportsManualPostProcessing == true,
-                    note = "Khóa nhiệt độ màu Kelvin & ma trận màu"
+                    note = "Kelvin color temperature lock & tone matrix control"
                 )
             }
 
@@ -781,7 +781,7 @@ private fun HardwareAuditPage(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "ỐNG KÍNH QUANG HỌC PHÁT HIỆN ĐƯỢC (${lenses.size} LENSES)",
+                        text = "DISCOVERED OPTICAL LENSES (${lenses.size} LENSES)",
                         color = Color(0xFFA1A1AA),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
@@ -816,7 +816,7 @@ private fun HardwareAuditPage(
                 border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
             ) {
                 Text(
-                    text = "← QUAY LẠI",
+                    text = "← BACK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -832,7 +832,7 @@ private fun HardwareAuditPage(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
             ) {
                 Text(
-                    text = "HOÀN TẤT & VÀO KÍNH NGẮM  →",
+                    text = "COMPLETE & LAUNCH VIEWFINDER  →",
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
@@ -872,7 +872,7 @@ private fun AuditChecklistRow(
             )
         }
         Text(
-            text = if (isSupported) "✓ ĐỦ" else "✕ THIẾU",
+            text = if (isSupported) "✓ SUPPORTED" else "✕ UNSUPPORTED",
             color = if (isSupported) Color(0xFF10B981) else Color(0xFFEF4444),
             fontSize = 9.sp,
             fontWeight = FontWeight.Black,

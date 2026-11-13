@@ -1,8 +1,6 @@
 package app.hoyu.shot.ui.components
 
 import android.os.Build
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,7 +73,7 @@ fun CameraHardwareLevelDialog(
                 ) {
                     Column {
                         Text(
-                            text = "CAM2 // HARDWARE LEVEL AUDIT",
+                            text = "SYS // HARDWARE COMPATIBILITY",
                             color = Color(0xFFE11D48),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
@@ -102,7 +100,7 @@ fun CameraHardwareLevelDialog(
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "ĐÓNG",
+                            text = "[CLOSE]",
                             color = Color(0xFFFAFAFA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -136,7 +134,7 @@ fun CameraHardwareLevelDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "CẢM BIẾN HIỆN TẠI (ACTIVE SENSOR)",
+                                text = "ACTIVE CAMERA SENSOR",
                                 color = Color(0xFFA1A1AA),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
@@ -195,7 +193,7 @@ fun CameraHardwareLevelDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "NĂNG LỰC CẢM BIẾN THỰC TẾ",
+                            text = "ACTUAL SENSOR CAPABILITIES",
                             color = Color(0xFFE11D48),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
@@ -205,25 +203,25 @@ fun CameraHardwareLevelDialog(
                         CapabilityRow(
                             label = "MANUAL SENSOR (ISO / SHUTTER SPEED)",
                             isSupported = capabilities?.supportsManualSensor == true,
-                            detail = if (capabilities?.supportsManualSensor == true) "Chỉnh tay ISO & Màn trập độc lập" else "Bị khóa hoặc giới hạn bởi nhà sản xuất"
+                            detail = if (capabilities?.supportsManualSensor == true) "Independent manual ISO & shutter duration supported" else "Locked or clamped by manufacturer driver"
                         )
 
                         CapabilityRow(
                             label = "RAW SENSOR OUTPUT (ADOBE DNG)",
                             isSupported = capabilities?.supportsRawCapture == true,
-                            detail = if (capabilities?.supportsRawCapture == true) "Hỗ trợ chụp RAW DNG 10/12-bit nguyên bản" else "Không hỗ trợ luồng dữ liệu RAW DNG"
+                            detail = if (capabilities?.supportsRawCapture == true) "Uncompressed 10/12-bit RAW DNG stream supported" else "No raw sensor buffer output capability"
                         )
 
                         CapabilityRow(
                             label = "MANUAL FOCUS DIOPTER (MF RING)",
                             isSupported = (capabilities?.minFocusDistanceDiopters ?: 0f) > 0f,
-                            detail = if ((capabilities?.minFocusDistanceDiopters ?: 0f) > 0f) "Lấy nét thủ công qua diopter quang học" else "Tiêu cự cố định hoặc không hỗ trợ MF"
+                            detail = if ((capabilities?.minFocusDistanceDiopters ?: 0f) > 0f) "Physical optical diopter focus distance supported" else "Fixed focus or no manual diopter control"
                         )
 
                         CapabilityRow(
                             label = "MANUAL POST-PROCESSING (AWB LOCK)",
                             isSupported = capabilities?.supportsManualPostProcessing == true,
-                            detail = if (capabilities?.supportsManualPostProcessing == true) "Khóa cân bằng trắng & hiệu chuẩn ma trận màu" else "Chỉ hỗ trợ AWB tự động cơ bản"
+                            detail = if (capabilities?.supportsManualPostProcessing == true) "Kelvin color temperature lock & tone matrix control" else "Basic automatic AWB only"
                         )
                     }
 
@@ -239,7 +237,7 @@ fun CameraHardwareLevelDialog(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "ỐNG KÍNH VẬT LÝ PHÁT HIỆN ĐƯỢC (${availableLenses.size} LENSES)",
+                                text = "DISCOVERED OPTICAL LENSES (${availableLenses.size} LENSES)",
                                 color = Color(0xFFA1A1AA),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
@@ -266,7 +264,7 @@ fun CameraHardwareLevelDialog(
                                     )
                                     if (isCurrent) {
                                         Text(
-                                            text = "[ĐANG CHỌN]",
+                                            text = "[ACTIVE]",
                                             color = Color(0xFFE11D48),
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
@@ -289,7 +287,7 @@ fun CameraHardwareLevelDialog(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = "BẢNG THAM CHIẾU CÁC CẤP ĐỘ CAMERA2",
+                            text = "HARDWARE COMPATIBILITY TIERS GUIDE",
                             color = Color(0xFFE11D48),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Black,
@@ -297,7 +295,7 @@ fun CameraHardwareLevelDialog(
                         )
 
                         Text(
-                            text = "Hệ điều hành Android phân loại camera thành 5 cấp độ phần cứng dựa trên khả năng can thiệp trực tiếp vào cảm biến quang học:",
+                            text = "Hardware compatibility is categorized into distinct tiers based on manual sensor capabilities:",
                             color = Color(0xFF71717A),
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace
@@ -333,7 +331,7 @@ fun CameraHardwareLevelDialog(
                                             .padding(horizontal = 4.dp, vertical = 1.dp)
                                     ) {
                                         Text(
-                                            text = if (ref.isFullySupported) "ĐỦ TÍNH NĂNG" else "HẠN CHẾ",
+                                            text = if (ref.isFullySupported) "FULL SUPPORT" else "RESTRICTED",
                                             color = ref.badgeColor,
                                             fontSize = 7.sp,
                                             fontWeight = FontWeight.Black,
@@ -387,7 +385,7 @@ private fun CapabilityRow(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = if (isSupported) "✓ HỖ TRỢ" else "✕ KHÔNG",
+                text = if (isSupported) "✓ SUPPORTED" else "✕ UNSUPPORTED",
                 color = if (isSupported) Color(0xFF10B981) else Color(0xFFEF4444),
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Black,
