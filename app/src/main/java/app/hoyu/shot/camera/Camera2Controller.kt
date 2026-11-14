@@ -1552,11 +1552,21 @@ class Camera2Controller(
         }
 
         try {
-            val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-
             val wantsRaw = captureRaw || format == CaptureFormat.RAW || format == CaptureFormat.RAW_JPEG
             val willCaptureRaw = wantsRaw && isRawStreamConfigured && rawImageReader != null
             val willCaptureJpeg = (format != CaptureFormat.RAW || !willCaptureRaw) && jpegImageReader != null
+            val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
+            val zslRequestKeys = chars.availableCaptureRequestKeys
+            val useZsl = willCaptureJpeg &&
+                !willCaptureRaw &&
+                !isBurst &&
+                !useHdrBurst &&
+                previewRequestBuilder?.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_ON &&
+                currentFlashMode == FlashMode.OFF &&
+                zslRequestKeys?.contains(CaptureRequest.CONTROL_ENABLE_ZSL) == true
+            val captureBuilder = device.createCaptureRequest(
+                if (useZsl) CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG else CameraDevice.TEMPLATE_STILL_CAPTURE
+            )
 
             if (willCaptureJpeg) {
                 captureBuilder.addTarget(jpegImageReader!!.surface)
@@ -1652,17 +1662,7 @@ class Camera2Controller(
             lastCapturedIso = null
             lastCapturedExposureNanos = null
 
-            val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
-            val zslRequestKeys = chars.availableCaptureRequestKeys
-            if (
-                willCaptureJpeg &&
-                !willCaptureRaw &&
-                !isBurst &&
-                !useHdrBurst &&
-                aeMode == CaptureRequest.CONTROL_AE_MODE_ON &&
-                currentFlashMode == FlashMode.OFF &&
-                zslRequestKeys?.contains(CaptureRequest.CONTROL_ENABLE_ZSL) == true
-            ) {
+            if (useZsl && aeMode == CaptureRequest.CONTROL_AE_MODE_ON) {
                 captureBuilder.set(CaptureRequest.CONTROL_ENABLE_ZSL, true)
             }
 
