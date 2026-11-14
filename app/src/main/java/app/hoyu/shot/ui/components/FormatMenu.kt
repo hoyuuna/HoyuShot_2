@@ -49,19 +49,20 @@ fun FormatMenu(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (!visible) return
-
     val view = LocalView.current
     val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
     val scrollState = rememberScrollState()
 
-    // 8-second auto-close timer reset on touch/interaction
-    var userInteractionTrigger by remember { mutableStateOf(0L) }
+    // 8-second auto-close timer starting from the exact moment user lifts finger off the popup
+    var isFingerTouching by remember { mutableStateOf(false) }
+    var touchReleaseEpoch by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(userInteractionTrigger) {
-        delay(8000)
-        onDismiss()
+    LaunchedEffect(touchReleaseEpoch, isFingerTouching, visible) {
+        if (visible && !isFingerTouching) {
+            delay(8000)
+            onDismiss()
+        }
     }
 
     val formatOptions = listOf(CaptureFormat.JPEG, CaptureFormat.RAW, CaptureFormat.RAW_JPEG)
@@ -84,8 +85,14 @@ fun FormatMenu(
                     .pointerInput(Unit) {
                         awaitPointerEventScope {
                             while (true) {
-                                awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                                userInteractionTrigger = System.currentTimeMillis()
+                                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                val touching = event.changes.any { it.pressed }
+                                if (touching != isFingerTouching) {
+                                    isFingerTouching = touching
+                                    if (!touching) {
+                                        touchReleaseEpoch = System.currentTimeMillis()
+                                    }
+                                }
                             }
                         }
                     },
