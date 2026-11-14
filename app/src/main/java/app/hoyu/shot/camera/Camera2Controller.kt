@@ -1604,23 +1604,9 @@ class Camera2Controller(
                 }
             }
 
-            // Apply full photo-capture Noise Reduction & Sharpness regardless of viewport latency mode
-            applyNoiseAndEdgeModes(captureBuilder, chars, currentNoiseReduction, currentSharpness, isPreview = false)
-
-            // Enable high-quality ISP color correction & tone mapping when Natural/Vivid profile is active
-            if (colorProfile != ColorProfile.OFF) {
-                val awbMode = captureBuilder.get(CaptureRequest.CONTROL_AWB_MODE)
-                if (awbMode != CaptureRequest.CONTROL_AWB_MODE_OFF) {
-                    captureBuilder.set(
-                        CaptureRequest.COLOR_CORRECTION_MODE,
-                        CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
-                    )
-                }
-                val availTonemap = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
-                if (availTonemap != null && availTonemap.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)) {
-                    captureBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
-                }
-            }
+            // Match ISP pipeline modes seamlessly with preview to eliminate hardware pipeline re-configuration stalls (0.2s - 0.3s shutter lag)
+            // Post-processing (NaturalColorProcessor) handles fine color tuning asynchronously on background threads without sensor latency.
+            applyNoiseAndEdgeModes(captureBuilder, chars, currentNoiseReduction, currentSharpness, isPreview = true)
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
 
