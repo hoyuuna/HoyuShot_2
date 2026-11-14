@@ -1377,6 +1377,17 @@ class Camera2Controller(
                 }
             }
 
+            val zslSupported = chars.availableCaptureRequestKeys
+                ?.contains(CaptureRequest.CONTROL_ENABLE_ZSL) == true
+            if (zslSupported) {
+                val enableZslForPreview =
+                    builder.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_ON &&
+                    currentFlashMode == FlashMode.OFF &&
+                    !isRawCaptureEnabled &&
+                    !isHdrEnabled
+                builder.set(CaptureRequest.CONTROL_ENABLE_ZSL, enableZslForPreview)
+            }
+
             // 7. Preview Noise Reduction & Sharpness (prioritize zero-latency preview; full quality applies at capture)
             val previewNr = if (isHqViewportEnabled) {
                 if (currentNoiseReduction == NoiseReductionMode.OFF) NoiseReductionMode.OFF else NoiseReductionMode.FAST

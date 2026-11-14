@@ -32,7 +32,7 @@ A professional manual DSLR camera application for Android, built natively with *
 
 ### 5. High-Speed Burst & Sensor Capture
 * **Burst Shutter:** Hold down the primary shutter button to trigger continuous multi-frame burst capture with a live shot counter badge.
-* **Zero-Shutter-Lag JPEG:** Uses the camera's ZSL capture path when supported for standard JPEG shots; image processing and storage run asynchronously in the background.
+* **Zero-Shutter-Lag JPEG:** Keeps the camera's ZSL buffer active during compatible preview and uses it for standard JPEG shots when supported; image processing and storage run asynchronously in the background.
 
 ### 6. Live Scopes & Composition Tools
 * **Real-Time RGB & Luma Histogram:** 256-bin frame-by-frame spectrum analysis measuring channel luminance and chromatic distribution.
