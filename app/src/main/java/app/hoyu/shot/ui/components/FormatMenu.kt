@@ -164,7 +164,7 @@ fun FormatMenu(
                                     )
                                     .clickable {
                                         view.triggerUiHaptic(uiHapticsEnabled)
-                                        touchReleaseEpoch = System.currentTimeMillis()
+                                        userInteractionTrigger = System.currentTimeMillis()
                                         onResolutionSelected(res)
                                     }
                                     .padding(horizontal = 10.dp),
@@ -233,7 +233,7 @@ fun FormatMenu(
                                     )
                                     .clickable(enabled = isEnabled) {
                                         view.triggerUiHaptic(uiHapticsEnabled)
-                                        touchReleaseEpoch = System.currentTimeMillis()
+                                        userInteractionTrigger = System.currentTimeMillis()
                                         onFormatSelected(fmt)
                                     }
                                     .padding(horizontal = 12.dp),

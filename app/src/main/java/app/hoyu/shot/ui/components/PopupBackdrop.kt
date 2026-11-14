@@ -2,7 +2,7 @@ package app.hoyu.shot.ui.components
 
 import android.view.HapticFeedbackConstants
 import android.view.View
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
