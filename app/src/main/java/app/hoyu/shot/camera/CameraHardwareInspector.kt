@@ -9,6 +9,7 @@ import android.hardware.camera2.CameraMetadata
 import android.os.Build
 import android.util.Log
 import android.util.Rational
+import app.hoyu.shot.data.SettingsRepository
 import app.hoyu.shot.model.HardwareCapabilities
 import app.hoyu.shot.model.LensItem
 import kotlin.math.roundToInt
@@ -17,13 +18,25 @@ class CameraHardwareInspector(private val context: Context) {
 
     private val TAG = "CameraHardwareInspector"
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    private val settingsRepo = SettingsRepository(context)
 
     /**
      * Deep probe scanner that uncovers manufacturer physical cameras (Xiaomi, Samsung, etc.)
      * Discovers discrete physical lenses (0.6x, 1x, 3.2x, etc.) based on true optical sensor characteristics.
      * Deduplicates fake auxiliary cameras (e.g. 1x [ID 5], 1x [ID 6]) and low-res depth sensors.
+     *
+     * Cached permanently in SettingsRepository so scanning only executes once (persisted across app restarts).
+     * Set [forceRefresh] to true to re-probe hardware (0..99).
      */
-    fun discoverAllLenses(): List<LensItem> {
+    fun discoverAllLenses(forceRefresh: Boolean = false): List<LensItem> {
+        if (!forceRefresh) {
+            val cached = settingsRepo.loadDiscoveredLenses()
+            if (!cached.isNullOrEmpty()) {
+                Log.d(TAG, "Loaded ${cached.size} cached lenses from storage")
+                return cached
+            }
+        }
+
         val discoveredCameras = mutableMapOf<String, CameraCharacteristics>()
 
         // 1. Official IDs reported by OS
@@ -58,8 +71,8 @@ class CameraHardwareInspector(private val context: Context) {
             }
         }
 
-        // 3. Deep Probe: Query candidate IDs 0..30 (uncovers Xiaomi physical lenses like ID 4 for 75mm telephoto)
-        val candidateProbeIds = (0..30).map { it.toString() }
+        // 3. Deep Probe: Query candidate IDs 0..99 (uncovers vendor physical lenses like ID 4, 52, etc.)
+        val candidateProbeIds = (0..99).map { it.toString() }
         for (candidateId in candidateProbeIds) {
             if (!discoveredCameras.containsKey(candidateId)) {
                 try {
@@ -149,6 +162,11 @@ class CameraHardwareInspector(private val context: Context) {
         // Guarantee at least 1x exists
         if (lenses.none { !it.isFront }) {
             lenses.add(0, LensItem("default_1x", "1x", "0", 1.0f, false))
+        }
+
+        // Save to persistent storage so subsequent app launches are instantaneous
+        if (lenses.isNotEmpty()) {
+            settingsRepo.saveDiscoveredLenses(lenses)
         }
 
         return lenses

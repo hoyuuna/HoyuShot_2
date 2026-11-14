@@ -6,6 +6,7 @@ import app.hoyu.shot.model.ColorProfile
 import app.hoyu.shot.model.CustomModePreset
 import app.hoyu.shot.model.ExposureMode
 import app.hoyu.shot.model.FlashMode
+import app.hoyu.shot.model.LensItem
 import app.hoyu.shot.model.NoiseReductionMode
 import app.hoyu.shot.model.SharpnessMode
 import app.hoyu.shot.model.WhiteBalancePreset
@@ -311,5 +312,46 @@ class SettingsRepository(context: Context) {
             array.put(obj)
         }
         prefs.edit().putString("saved_custom_presets_json", array.toString()).apply()
+    }
+
+    fun loadDiscoveredLenses(): List<LensItem>? {
+        val raw = prefs.getString("cached_discovered_lenses_json", null) ?: return null
+        return try {
+            val array = JSONArray(raw)
+            if (array.length() == 0) return null
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    val label = obj.optString("label").takeIf { it.isNotBlank() } ?: continue
+                    val cameraId = obj.optString("cameraId").takeIf { it.isNotBlank() } ?: continue
+                    val zoomRatio = obj.optDouble("zoomRatio", 1.0).toFloat()
+                    val isFront = obj.optBoolean("isFront", false)
+                    add(LensItem(id = id, label = label, cameraId = cameraId, zoomRatio = zoomRatio, isFront = isFront))
+                }
+            }.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun saveDiscoveredLenses(lenses: List<LensItem>) {
+        if (lenses.isEmpty()) return
+        val array = JSONArray()
+        for (lens in lenses) {
+            val obj = JSONObject().apply {
+                put("id", lens.id)
+                put("label", lens.label)
+                put("cameraId", lens.cameraId)
+                put("zoomRatio", lens.zoomRatio.toDouble())
+                put("isFront", lens.isFront)
+            }
+            array.put(obj)
+        }
+        prefs.edit().putString("cached_discovered_lenses_json", array.toString()).apply()
+    }
+
+    fun clearDiscoveredLenses() {
+        prefs.edit().remove("cached_discovered_lenses_json").apply()
     }
 }
