@@ -1473,14 +1473,15 @@ private fun BottomControlsContent(
                             if (uiState.isCapturing || uiState.isLongExposing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
                             CircleShape
                         )
-                        .pointerInput(uiState.isLongExposing, uiState.timerMode, uiState.timerCountdownSeconds) {
+                        .pointerInput(uiState.isLongExposing, uiState.timerMode) {
                             detectTapGestures(
                                 onPress = {
                                     if (uiState.isLongExposing) return@detectTapGestures
-                                    val isTimerActive = uiState.timerMode != TimerMode.OFF || uiState.timerCountdownSeconds != null
+                                    val isTimerActive = uiState.timerMode != TimerMode.OFF
                                     var isHolding = true
-                                    val startTime = System.currentTimeMillis()
                                     var burstJob: Job? = null
+
+                                    onCapture()
 
                                     if (!isTimerActive) {
                                         burstJob = coroutineScope.launch {
@@ -1500,12 +1501,7 @@ private fun BottomControlsContent(
 
                                     tryAwaitRelease()
                                     isHolding = false
-                                    val duration = System.currentTimeMillis() - startTime
                                     burstJob?.cancel()
-
-                                    if (!isBursting && (isTimerActive || duration < 500)) {
-                                        onCapture()
-                                    }
 
                                     isBursting = false
                                     burstCount = 0
