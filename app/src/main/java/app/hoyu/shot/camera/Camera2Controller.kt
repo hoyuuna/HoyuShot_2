@@ -1653,7 +1653,7 @@ class Camera2Controller(
             lastCapturedExposureNanos = null
 
             val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
-            val zslRequestKeys = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_REQUEST_KEYS)
+            val zslRequestKeys = chars.availableCaptureRequestKeys
             if (
                 willCaptureJpeg &&
                 !willCaptureRaw &&
