@@ -227,12 +227,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val initFormat = if (isResume && lensSupportsRaw) parsedFormat else CaptureFormat.JPEG
         val initRaw = initFormat == CaptureFormat.RAW || initFormat == CaptureFormat.RAW_JPEG
 
-        val initMinShutter = settingsRepo.savedMinShutterLimitNanos?.let { saved ->
-            caps?.shutterSpeedRangeNanos?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
-        }
-        val initMaxIso = settingsRepo.savedMaxIsoLimit?.let { saved ->
-            caps?.isoRange?.let { saved.coerceIn(it.lower, it.upper) } ?: saved
-        }
+        val initMinShutter: Long? = null
+        val initMaxIso: Int? = null
 
         val initNr = if (isResume) {
             try { NoiseReductionMode.valueOf(settingsRepo.savedNoiseReduction) } catch (e: Exception) { NoiseReductionMode.FAST }
@@ -1235,23 +1231,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleShutterLimit(nanos: Long) {
-        detachCustomPresetOnUserEdit()
-        val currentLimit = _uiState.value.minShutterLimitNanos
-        val newLimit = if (currentLimit == nanos) null else nanos
-        _uiState.update { it.copy(minShutterLimitNanos = newLimit, exposureMode = ExposureMode.AUTO) }
-        settingsRepo.savedMinShutterLimitNanos = newLimit
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedExposureMode = ExposureMode.AUTO.name
-        applyCurrentSettings()
+        // Feature deprecated
     }
 
     fun toggleIsoLimit(iso: Int) {
-        detachCustomPresetOnUserEdit()
-        val currentLimit = _uiState.value.maxIsoLimit
-        val newLimit = if (currentLimit == iso) null else iso
-        _uiState.update { it.copy(maxIsoLimit = newLimit, exposureMode = ExposureMode.AUTO) }
-        settingsRepo.savedMaxIsoLimit = newLimit
-        if (_uiState.value.isResumeSettingsEnabled) settingsRepo.savedExposureMode = ExposureMode.AUTO.name
-        applyCurrentSettings()
+        // Feature deprecated
     }
 
     fun setColorProfile(profile: ColorProfile) {

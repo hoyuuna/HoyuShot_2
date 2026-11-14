@@ -48,48 +48,14 @@ fun PopupGlassContainer(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    var popupBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
-    val borderColor = if (isBlurEnabled) Color(0x3DFFFFFF) else Color(0xFF27272A)
+    val borderColor = Color(0xFF27272A)
 
     Box(
         modifier = modifier
             .clip(shape)
-            .onGloballyPositioned { coords ->
-                popupBoundsInRoot = coords.boundsInRoot()
-            }
+            .background(Color(0xFF09090B))
             .border(1.dp, borderColor, shape)
     ) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            if (isBlurEnabled &&
-                blurredBackdrop != null &&
-                !previewBoundsInRoot.isEmpty &&
-                !popupBoundsInRoot.isEmpty
-            ) {
-                // Dark base for regions outside the camera preview (e.g. letterbox bars)
-                drawRect(Color(0xEB09090B))
-
-                val popupCenter = popupBoundsInRoot.center
-                val localCenter = Offset(size.width / 2f, size.height / 2f)
-                rotate(degrees = -rotationDegrees, pivot = localCenter) {
-                    val dstLeft = (localCenter.x + (previewBoundsInRoot.left - popupCenter.x)).roundToInt()
-                    val dstTop = (localCenter.y + (previewBoundsInRoot.top - popupCenter.y)).roundToInt()
-                    val dstW = previewBoundsInRoot.width.roundToInt().coerceAtLeast(1)
-                    val dstH = previewBoundsInRoot.height.roundToInt().coerceAtLeast(1)
-                    drawImage(
-                        image = blurredBackdrop,
-                        dstOffset = IntOffset(dstLeft, dstTop),
-                        dstSize = IntSize(dstW, dstH),
-                        filterQuality = FilterQuality.Medium
-                    )
-                }
-
-                // iOS dark translucent frosted glass tint + subtle specular sheen
-                drawRect(Color(0x9C09090B))
-                drawRect(Color(0x0DFFFFFF))
-            } else {
-                drawRect(if (isBlurEnabled) Color(0xEB09090B) else Color(0xFF09090B))
-            }
-        }
         content()
     }
 }

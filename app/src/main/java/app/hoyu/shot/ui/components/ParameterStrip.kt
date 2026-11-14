@@ -86,7 +86,7 @@ fun HorizontalParameterStrip(
             value = shutterText,
             isActive = isShutterActive,
             isManual = isShutterManual,
-            hasLimit = uiState.minShutterLimitNanos != null,
+            hasLimit = false,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.triggerUiHaptic(uiHapticsEnabled)
@@ -99,7 +99,7 @@ fun HorizontalParameterStrip(
             value = isoText,
             isActive = isIsoActive,
             isManual = isIsoManual,
-            hasLimit = uiState.maxIsoLimit != null,
+            hasLimit = false,
             rotationDegrees = rotationDegrees,
             onClick = {
                 view.triggerUiHaptic(uiHapticsEnabled)

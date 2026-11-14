@@ -50,7 +50,7 @@ fun AdvancedSettingsDialog(
     onVolumeDownActionChanged: (String) -> Unit,
     onCameraSoundChanged: (String) -> Unit,
     onUiHapticsChanged: (String) -> Unit,
-    onToggleUiBlur: () -> Unit,
+    onToggleUiBlur: () -> Unit = {},
     onToggleAutoUpdateCheck: () -> Unit,
     onTogglePreReleaseUpdate: () -> Unit,
     onToggleTeleZoomFallback: () -> Unit = {},
@@ -101,7 +101,7 @@ fun AdvancedSettingsDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (uiState.isUiBlurEnabled) Color(0x66000000) else Color(0xCC000000))
+                .background(Color(0xCC000000))
                 .clickable(
                     indication = null,
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -508,14 +508,6 @@ fun AdvancedSettingsDialog(
                     subtitle = if (uiState.isHqViewportEnabled) "Sharp high-res viewfinder (light NR/edge); photo capture keeps full quality" else "Zero-latency raw preview (lower res, NR/edge OFF on viewfinder only)",
                     isActive = uiState.isHqViewportEnabled,
                     onToggle = onToggleHqViewport
-                )
-
-                // Interface Blur Toggle
-                SettingsToggleRow(
-                    title = "INTERFACE BLUR",
-                    subtitle = if (uiState.isUiBlurEnabled) "Translucent frosted popup backdrops" else "Solid opaque black panels",
-                    isActive = uiState.isUiBlurEnabled,
-                    onToggle = onToggleUiBlur
                 )
 
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
