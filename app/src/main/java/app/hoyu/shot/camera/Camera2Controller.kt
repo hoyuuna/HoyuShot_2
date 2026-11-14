@@ -1653,6 +1653,19 @@ class Camera2Controller(
             lastCapturedExposureNanos = null
 
             val useHdrBurst = isHdrEnabled && !isBurst && willCaptureJpeg && format != CaptureFormat.RAW
+            val zslRequestKeys = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_REQUEST_KEYS)
+            if (
+                willCaptureJpeg &&
+                !willCaptureRaw &&
+                !isBurst &&
+                !useHdrBurst &&
+                aeMode == CaptureRequest.CONTROL_AE_MODE_ON &&
+                currentFlashMode == FlashMode.OFF &&
+                zslRequestKeys?.contains(CaptureRequest.CONTROL_ENABLE_ZSL) == true
+            ) {
+                captureBuilder.set(CaptureRequest.CONTROL_ENABLE_ZSL, true)
+            }
+
             val snapIso = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
                 (captureBuilder.get(CaptureRequest.SENSOR_SENSITIVITY) ?: currentIso).coerceAtLeast(1)
             } else {
