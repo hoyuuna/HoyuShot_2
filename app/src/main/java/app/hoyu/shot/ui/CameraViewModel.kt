@@ -1541,7 +1541,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setCaptureFormat(nextFormat)
     }
 
-    fun takePicture() {
+    fun takePicture(touchTimestampNanos: Long? = null) {
         if (_uiState.value.isCapturing) return
 
         val timer = _uiState.value.timerMode.seconds
@@ -1560,14 +1560,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(timerCountdownSeconds = null, isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
                 cameraController.takePicture(
                     captureRaw = _uiState.value.captureRaw,
-                    format = _uiState.value.captureFormat
+                    format = _uiState.value.captureFormat,
+                    touchTimestampNanos = null
                 )
             }
         } else {
             _uiState.update { it.copy(isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
             cameraController.takePicture(
                 captureRaw = _uiState.value.captureRaw,
-                format = _uiState.value.captureFormat
+                format = _uiState.value.captureFormat,
+                touchTimestampNanos = touchTimestampNanos ?: android.os.SystemClock.elapsedRealtimeNanos()
             )
         }
     }

@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
+import android.graphics.YuvImage
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
@@ -16,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
@@ -32,6 +34,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class Camera2Controller(
@@ -113,6 +116,22 @@ class Camera2Controller(
     private val pendingHdrBursts = mutableListOf<HdrBurstBuffer>()
     private val pendingJpegSnapshots = mutableListOf<CaptureExifSnapshot>()
     private var nextHdrBurstId: Long = 1L
+
+    // Zero Shutter Lag (ZSL) Rolling Frame Ring Buffer
+    // Buffers recent uncompressed frames continuously in RAM with sensor timestamps
+    // so when user touches shutter, we extract the exact millisecond-matched frame with 0ms lag.
+    private data class ZslRollingFrame(
+        val sensorTimestampNanos: Long,
+        val captureTimeNanos: Long,
+        val nv21Data: ByteArray,
+        val width: Int,
+        val height: Int,
+        val sensorIso: Int,
+        val sensorExposureNanos: Long
+    )
+    private val zslBufferLock = Any()
+    private val zslRollingBuffer = java.util.ArrayDeque<ZslRollingFrame>(5)
+    private var lastRollingFrameCaptureTimeNanos: Long = 0L
     // Dedicated worker pool for HDR fusion / NaturalColorProcessor / JPEG EXIF saving
     // so CameraBackgroundThread stays free for zero-lag shutter & ImageReader callbacks.
     private val postProcessExecutor = Executors.newFixedThreadPool(2)
@@ -267,12 +286,20 @@ class Camera2Controller(
         }
     }
 
+    private fun isZslEligible(): Boolean {
+        return !isRawCaptureEnabled &&
+            captureFormat == CaptureFormat.JPEG &&
+            currentFlashMode == FlashMode.OFF &&
+            lastMeasuredShutter < 200_000_000L
+    }
+
     private fun needsAnalysisStream(): Boolean {
         val needPriorityMeter = !isAeLocked &&
             (currentExposureMode == ExposureMode.SHUTTER_PRIORITY || currentExposureMode == ExposureMode.ISO_PRIORITY)
         val needClamp = !isAeLocked && isExposureClamped &&
             (currentExposureMode == ExposureMode.AUTO || currentExposureMode == ExposureMode.PROGRAM)
-        return isHistogramOverlayEnabled ||
+        return isZslEligible() ||
+            isHistogramOverlayEnabled ||
             isPeakingOverlayEnabled ||
             isZebraOverlayEnabled ||
             isBlurBackdropNeeded ||
@@ -455,6 +482,58 @@ class Camera2Controller(
         }
     }
 
+    /**
+     * Converts a YUV_420_888 Image into a tightly packed NV21 byte array.
+     */
+    private fun yuv420888ToNv21(image: android.media.Image): ByteArray? {
+        val planes = image.planes
+        if (planes.size < 3) return null
+        val width = image.width
+        val height = image.height
+        val nv21 = ByteArray(width * height * 3 / 2)
+
+        val yBuffer = planes[0].buffer
+        val uBuffer = planes[1].buffer
+        val vBuffer = planes[2].buffer
+
+        val yRowStride = planes[0].rowStride
+        val yPixelStride = planes[0].pixelStride
+        val uRowStride = planes[1].rowStride
+        val uPixelStride = planes[1].pixelStride
+        val vRowStride = planes[2].rowStride
+        val vPixelStride = planes[2].pixelStride
+
+        var pos = 0
+        // Copy Y channel
+        if (yPixelStride == 1 && yRowStride == width) {
+            val remaining = yBuffer.remaining().coerceAtMost(width * height)
+            yBuffer.get(nv21, 0, remaining)
+            pos = width * height
+        } else {
+            for (row in 0 until height) {
+                val rowStart = row * yRowStride
+                for (col in 0 until width) {
+                    nv21[pos++] = yBuffer.get(rowStart + col * yPixelStride)
+                }
+            }
+        }
+
+        // Copy UV interleaved (NV21: V followed by U)
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        for (row in 0 until chromaHeight) {
+            val uRowStart = row * uRowStride
+            val vRowStart = row * vRowStride
+            for (col in 0 until chromaWidth) {
+                val v = vBuffer.get(vRowStart + col * vPixelStride)
+                val u = uBuffer.get(uRowStart + col * uPixelStride)
+                nv21[pos++] = v
+                nv21[pos++] = u
+            }
+        }
+        return nv21
+    }
+
     private fun setupImageReaders(chars: CameraCharacteristics, targetRatio: AspectRatio) {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
 
@@ -476,8 +555,9 @@ class Camera2Controller(
                             val needMetering = needPriorityMeter || needClampCheck
                             val needOverlays = isPeakingOverlayEnabled || isZebraOverlayEnabled
                             val needBlur = isBlurBackdropNeeded
+                            val zslActive = isZslEligible()
 
-                            if (!isHistogramOverlayEnabled && !needMetering && !needOverlays && !needBlur) {
+                            if (!isHistogramOverlayEnabled && !needMetering && !needOverlays && !needBlur && !zslActive) {
                                 return@setOnImageAvailableListener
                             }
 
@@ -486,6 +566,31 @@ class Camera2Controller(
                             val isFront = cChars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
 
                             val nowMs = System.currentTimeMillis()
+                            val nowNanos = SystemClock.elapsedRealtimeNanos()
+
+                            // Rolling Buffer for Zero Shutter Lag:
+                            // Cache recent YUV frames (throttled to ~30fps / >= 28ms apart)
+                            if (zslActive && (nowNanos - lastRollingFrameCaptureTimeNanos >= 28_000_000L)) {
+                                val nv21 = yuv420888ToNv21(image)
+                                if (nv21 != null) {
+                                    lastRollingFrameCaptureTimeNanos = nowNanos
+                                    val rFrame = ZslRollingFrame(
+                                        sensorTimestampNanos = image.timestamp,
+                                        captureTimeNanos = nowNanos,
+                                        nv21Data = nv21,
+                                        width = image.width,
+                                        height = image.height,
+                                        sensorIso = lastMeasuredIso,
+                                        sensorExposureNanos = lastMeasuredShutter
+                                    )
+                                    synchronized(zslBufferLock) {
+                                        while (zslRollingBuffer.size >= 5) {
+                                            zslRollingBuffer.pollFirst()
+                                        }
+                                        zslRollingBuffer.addLast(rFrame)
+                                    }
+                                }
+                            }
                             val meterTick = needMetering &&
                                 nowMs >= aeMeteringSettleUntilMs &&
                                 (nowMs - lastMeteringAdjustMs >= 110L)
@@ -1545,14 +1650,99 @@ class Camera2Controller(
     private val photoCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
     fun takeBurstPicture(captureRaw: Boolean, format: CaptureFormat = this.captureFormat) {
-        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = true)
+        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = true, touchTimestampNanos = null)
     }
 
-    fun takePicture(captureRaw: Boolean, format: CaptureFormat = this.captureFormat) {
-        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = false)
+    fun takePicture(
+        captureRaw: Boolean,
+        format: CaptureFormat = this.captureFormat,
+        touchTimestampNanos: Long? = null
+    ) {
+        // Zero Shutter Lag: If eligible and touch timestamp is provided, attempt to capture from rolling ring buffer
+        if (!captureRaw && format == CaptureFormat.JPEG && isZslEligible() && touchTimestampNanos != null) {
+            val matched = findAndConsumeClosestZslFrame(touchTimestampNanos)
+            if (matched != null) {
+                // Immediate shutter release signal
+                isCapturing = false
+                onExposureCompleted?.invoke()
+
+                // Asynchronously compress and process the matched frame
+                enqueuePostProcess {
+                    processZslRollingFrame(matched)
+                }
+                return
+            }
+        }
+
+        // Standard or fallback capture path
+        submitCaptureRequest(captureRaw = captureRaw, format = format, isBurst = false, touchTimestampNanos = touchTimestampNanos)
     }
 
-    private fun submitCaptureRequest(captureRaw: Boolean, format: CaptureFormat, isBurst: Boolean) {
+    private fun findAndConsumeClosestZslFrame(touchTimestampNanos: Long): ZslRollingFrame? {
+        synchronized(zslBufferLock) {
+            if (zslRollingBuffer.isEmpty()) return null
+            val best = zslRollingBuffer.minByOrNull {
+                Math.abs(it.captureTimeNanos - touchTimestampNanos)
+            }
+            // Clear buffer so consecutive shots don't reuse the exact same instant
+            zslRollingBuffer.clear()
+            return best
+        }
+    }
+
+    private fun processZslRollingFrame(frame: ZslRollingFrame) {
+        val chars = currentCharacteristics
+        val yuvImage = YuvImage(
+            frame.nv21Data,
+            ImageFormat.NV21,
+            frame.width,
+            frame.height,
+            null
+        )
+        val outStream = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(
+            Rect(0, 0, frame.width, frame.height),
+            jpegQuality.coerceIn(80, 100),
+            outStream
+        )
+        val jpegBytes = outStream.toByteArray()
+
+        val isFacingFront = chars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        val sensorOrientation = chars?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val jpegOrientation = if (isFacingFront) {
+            (sensorOrientation + deviceOrientationDegrees) % 360
+        } else {
+            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        }
+        val snapEvStep = chars?.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
+
+        val zslSnapshot = CaptureExifSnapshot(
+            captureTimeMs = System.currentTimeMillis(),
+            characteristics = chars,
+            exposureMode = currentExposureMode,
+            iso = frame.sensorIso.coerceAtLeast(1),
+            exposureNanos = frame.sensorExposureNanos.coerceAtLeast(1L),
+            evIndex = currentEvIndex,
+            evStep = snapEvStep,
+            whiteBalancePreset = currentWbPreset,
+            flashMode = currentFlashMode,
+            flashFired = false,
+            digitalZoomRatio = currentZoomRatio,
+            tapAeActive = currentAeMeteringRect != null,
+            location = if (isGeotaggingEnabled) locationHelper.getBestLocation() else null,
+            isExifSoftwareTagEnabled = isExifSoftwareTagEnabled,
+            deviceJpegOrientation = jpegOrientation
+        )
+
+        saveJpegBytes(jpegBytes, exifSnapshot = zslSnapshot)
+    }
+
+    private fun submitCaptureRequest(
+        captureRaw: Boolean,
+        format: CaptureFormat,
+        isBurst: Boolean,
+        touchTimestampNanos: Long? = null
+    ) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
         val chars = currentCharacteristics ?: return
@@ -2346,6 +2536,9 @@ class Camera2Controller(
     }
 
     fun closeCamera() {
+        synchronized(zslBufferLock) {
+            zslRollingBuffer.clear()
+        }
         clearPendingRawBuffers()
         isRawStreamConfigured = false
         isAnalysisTargetAttached = false
