@@ -175,7 +175,7 @@ class SettingsRepository(context: Context) {
         set(value) = prefs.edit().putString("adv_antibanding", value).apply()
 
     var isZeroShutterLagEnabled: Boolean
-        get() = prefs.getBoolean("adv_zsl_enabled", true)
+        get() = prefs.getBoolean("adv_zsl_enabled", false)
         set(value) = prefs.edit().putBoolean("adv_zsl_enabled", value).apply()
 
     var isUiBlurEnabled: Boolean

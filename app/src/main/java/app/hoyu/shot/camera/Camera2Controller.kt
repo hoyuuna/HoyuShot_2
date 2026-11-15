@@ -103,7 +103,7 @@ class Camera2Controller(
     @Volatile var isZebraOverlayEnabled: Boolean = false
     @Volatile var isBlurBackdropNeeded: Boolean = false
     @Volatile var isHqViewportEnabled: Boolean = true
-    @Volatile var isZeroShutterLagEnabled: Boolean = true
+    @Volatile var isZeroShutterLagEnabled: Boolean = false
     @Volatile var colorProfile: ColorProfile = ColorProfile.NATURAL
     @Volatile var isHdrEnabled: Boolean = false
 
