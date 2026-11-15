@@ -362,7 +362,7 @@ fun CameraScreen(
                             },
                             onOpenGallery = { viewModel.openGallery() },
                             onOpenModeModal = { isModeModalVisible = true },
-                            onCapture = { touchTimestampNanos -> viewModel.takePicture(touchTimestampNanos) },
+                            onCapture = { viewModel.takePicture() },
                             onBurstCapture = { viewModel.takeBurstShot() },
                             onToggleFlip = { viewModel.toggleCameraFacing() },
                             onToggleFlash = { viewModel.toggleFlash() },
@@ -462,7 +462,7 @@ fun CameraScreen(
                             },
                             onOpenGallery = { viewModel.openGallery() },
                             onOpenModeModal = { isModeModalVisible = true },
-                            onCapture = { touchTimestampNanos -> viewModel.takePicture(touchTimestampNanos) },
+                            onCapture = { viewModel.takePicture() },
                             onBurstCapture = { viewModel.takeBurstShot() },
                             onToggleFlip = { viewModel.toggleCameraFacing() },
                             onToggleFlash = { viewModel.toggleFlash() },
@@ -1313,7 +1313,7 @@ private fun BottomControlsContent(
     onParamClick: (DialParameter) -> Unit,
     onOpenGallery: () -> Unit,
     onOpenModeModal: () -> Unit,
-    onCapture: (touchTimestampNanos: Long) -> Unit,
+    onCapture: () -> Unit,
     onBurstCapture: () -> Unit,
     onToggleFlip: () -> Unit,
     onToggleFlash: () -> Unit,
@@ -1443,12 +1443,11 @@ private fun BottomControlsContent(
                         detectTapGestures(
                             onPress = {
                                 if (uiState.isLongExposing) return@detectTapGestures
-                                val touchNanos = android.os.SystemClock.elapsedRealtimeNanos()
                                 val isTimerActive = uiState.timerMode != TimerMode.OFF
                                 var isHolding = true
                                 var burstJob: Job? = null
 
-                                onCapture(touchNanos)
+                                onCapture()
 
                                 if (!isTimerActive) {
                                     burstJob = coroutineScope.launch {
