@@ -118,19 +118,19 @@ class Camera2Controller(
     private val pendingJpegSnapshots = mutableListOf<CaptureExifSnapshot>()
     private var nextHdrBurstId: Long = 1L
     // Zero Shutter Lag (ZSL) Rolling Frame Ring Buffer
-    // Buffers recent uncompressed NV21 frames continuously in RAM with sensor timestamps
-    // matching user's selected resolution (or full sensor max if none specified).
+    // Buffers recent uncompressed android.media.Image instances with ZERO CPU COPY overhead in preview loop.
+    // Frame conversion to NV21/JPEG is deferred ONLY to the instant the shutter button is touched.
     private data class ZslRollingFrame(
         val sensorTimestampNanos: Long,
         val captureTimeNanos: Long,
-        val nv21Data: ByteArray,
+        val image: android.media.Image,
         val width: Int,
         val height: Int,
         val sensorIso: Int,
         val sensorExposureNanos: Long
     )
     private val zslBufferLock = Any()
-    private val zslRollingBuffer = java.util.ArrayDeque<ZslRollingFrame>(3)
+    private val zslRollingBuffer = java.util.ArrayDeque<ZslRollingFrame>(4)
     private var lastRollingFrameCaptureTimeNanos: Long = 0L
     private var isZslTargetAttached: Boolean = false
 
@@ -540,6 +540,9 @@ class Camera2Controller(
         targetRes: Pair<Int, Int>?
     ) {
         synchronized(zslBufferLock) {
+            zslRollingBuffer.forEach {
+                try { it.image.close() } catch (_: Exception) {}
+            }
             zslRollingBuffer.clear()
         }
         zslImageReader?.close()
@@ -568,8 +571,9 @@ class Camera2Controller(
 
         if (chosenYuvSize != null) {
             Log.i(TAG, "Configuring ZSL rolling buffer at ${chosenYuvSize.width}x${chosenYuvSize.height} (user resolution match)")
+            // MaxImages = 4 allows keeping 2-3 uncompressed images in rolling buffer without starvation
             zslImageReader = ImageReader.newInstance(
-                chosenYuvSize.width, chosenYuvSize.height, ImageFormat.YUV_420_888, 3
+                chosenYuvSize.width, chosenYuvSize.height, ImageFormat.YUV_420_888, 4
             ).apply {
                 setOnImageAvailableListener({ reader ->
                     val image = try {
@@ -580,34 +584,36 @@ class Camera2Controller(
 
                     try {
                         if (!isZslEligible()) {
+                            image.close()
                             return@setOnImageAvailableListener
                         }
                         val nowNanos = SystemClock.elapsedRealtimeNanos()
-                        // Keep stream smooth at ~30fps (>= 28ms apart)
-                        if (nowNanos - lastRollingFrameCaptureTimeNanos >= 28_000_000L) {
-                            val nv21 = yuv420888ToNv21(image)
-                            if (nv21 != null) {
-                                lastRollingFrameCaptureTimeNanos = nowNanos
-                                val rFrame = ZslRollingFrame(
-                                    sensorTimestampNanos = image.timestamp,
-                                    captureTimeNanos = nowNanos,
-                                    nv21Data = nv21,
-                                    width = image.width,
-                                    height = image.height,
-                                    sensorIso = lastMeasuredIso,
-                                    sensorExposureNanos = lastMeasuredShutter
-                                )
-                                synchronized(zslBufferLock) {
-                                    while (zslRollingBuffer.size >= 3) {
-                                        zslRollingBuffer.pollFirst()
-                                    }
-                                    zslRollingBuffer.addLast(rFrame)
+                        // Throttle to ~18fps (>= 52ms apart): drastically reduces sensor/ISP heating and battery drain
+                        // while maintaining sub-30ms capture lag matching finger touch instant.
+                        if (nowNanos - lastRollingFrameCaptureTimeNanos >= 52_000_000L) {
+                            lastRollingFrameCaptureTimeNanos = nowNanos
+                            val rFrame = ZslRollingFrame(
+                                sensorTimestampNanos = image.timestamp,
+                                captureTimeNanos = nowNanos,
+                                image = image,
+                                width = image.width,
+                                height = image.height,
+                                sensorIso = lastMeasuredIso,
+                                sensorExposureNanos = lastMeasuredShutter
+                            )
+                            var discardedFrame: ZslRollingFrame? = null
+                            synchronized(zslBufferLock) {
+                                while (zslRollingBuffer.size >= 2) {
+                                    discardedFrame = zslRollingBuffer.pollFirst()
+                                    try { discardedFrame?.image?.close() } catch (_: Exception) {}
                                 }
+                                zslRollingBuffer.addLast(rFrame)
                             }
+                        } else {
+                            // Drop intermediate frame immediately: zero CPU copy
+                            image.close()
                         }
                     } catch (e: Exception) {
-                        // ignore drop
-                    } finally {
                         try { image.close() } catch (_: Exception) {}
                     }
                 }, analysisHandler ?: backgroundHandler)
@@ -1759,15 +1765,31 @@ class Camera2Controller(
             val best = zslRollingBuffer.minByOrNull {
                 Math.abs(it.captureTimeNanos - touchTimestampNanos)
             }
+            // Close all other images that were not selected
+            zslRollingBuffer.forEach {
+                if (it !== best) {
+                    try { it.image.close() } catch (_: Exception) {}
+                }
+            }
             zslRollingBuffer.clear()
             return best
         }
     }
 
     private fun processZslRollingFrame(frame: ZslRollingFrame) {
+        val nv21 = try {
+            yuv420888ToNv21(frame.image)
+        } finally {
+            try { frame.image.close() } catch (_: Exception) {}
+        }
+        if (nv21 == null) {
+            Log.e(TAG, "Failed to convert ZSL frame to NV21")
+            return
+        }
+
         val chars = currentCharacteristics
         val yuvImage = YuvImage(
-            frame.nv21Data,
+            nv21,
             ImageFormat.NV21,
             frame.width,
             frame.height,
@@ -2611,6 +2633,9 @@ class Camera2Controller(
 
     fun closeCamera() {
         synchronized(zslBufferLock) {
+            zslRollingBuffer.forEach {
+                try { it.image.close() } catch (_: Exception) {}
+            }
             zslRollingBuffer.clear()
         }
         clearPendingRawBuffers()
