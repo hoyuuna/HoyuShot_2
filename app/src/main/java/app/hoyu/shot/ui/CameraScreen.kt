@@ -1437,6 +1437,43 @@ private fun BottomControlsContent(
 
             // Shutter Button with Burst Shooting (Hold >= 0.5s) & Exposure duration feedback
             Box(
+                modifier = Modifier
+                    .size(86.dp)
+                    .pointerInput(uiState.isLongExposing, uiState.timerMode) {
+                        detectTapGestures(
+                            onPress = {
+                                if (uiState.isLongExposing) return@detectTapGestures
+                                val isTimerActive = uiState.timerMode != TimerMode.OFF
+                                var isHolding = true
+                                var burstJob: Job? = null
+
+                                onCapture()
+
+                                if (!isTimerActive) {
+                                    burstJob = coroutineScope.launch {
+                                        delay(500)
+                                        if (isHolding) {
+                                            isBursting = true
+                                            burstCount = 0
+                                            while (isHolding) {
+                                                burstCount++
+                                                onBurstCapture()
+                                                val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(100L, 500L)
+                                                delay(exposureMs)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                tryAwaitRelease()
+                                isHolding = false
+                                burstJob?.cancel()
+
+                                isBursting = false
+                                burstCount = 0
+                            }
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 // Burst count indicator badge when burst shooting is active
@@ -1472,42 +1509,7 @@ private fun BottomControlsContent(
                         .background(
                             if (uiState.isCapturing || uiState.isLongExposing) Color(0xFFE4E4E7) else Color(0xFFFFFFFF),
                             CircleShape
-                        )
-                        .pointerInput(uiState.isLongExposing, uiState.timerMode) {
-                            detectTapGestures(
-                                onPress = {
-                                    if (uiState.isLongExposing) return@detectTapGestures
-                                    val isTimerActive = uiState.timerMode != TimerMode.OFF
-                                    var isHolding = true
-                                    var burstJob: Job? = null
-
-                                    onCapture()
-
-                                    if (!isTimerActive) {
-                                        burstJob = coroutineScope.launch {
-                                            delay(500)
-                                            if (isHolding) {
-                                                isBursting = true
-                                                burstCount = 0
-                                                while (isHolding) {
-                                                    burstCount++
-                                                    onBurstCapture()
-                                                    val exposureMs = (uiState.shutterSpeedNanos / 1_000_000L).coerceIn(100L, 500L)
-                                                    delay(exposureMs)
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    tryAwaitRelease()
-                                    isHolding = false
-                                    burstJob?.cancel()
-
-                                    isBursting = false
-                                    burstCount = 0
-                                }
-                            )
-                        },
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     if (uiState.isLongExposing) {

@@ -443,24 +443,13 @@ fun SettingsDialog(
                     )
                 }
 
-                // Split row: Sun Compass HUD + HDR AEB (both default OFF)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ConfigToggleItem(
-                        title = "SUN COMPASS",
-                        isActive = uiState.isSunCompassEnabled,
-                        onClick = onToggleSunCompass,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ConfigToggleItem(
-                        title = "HDR // AEB",
-                        isActive = uiState.isHdrEnabled,
-                        onClick = onToggleHdr,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                // Sun Compass HUD row
+                ConfigToggleItem(
+                    title = "SUN COMPASS",
+                    isActive = uiState.isSunCompassEnabled,
+                    onClick = onToggleSunCompass,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // 4. Advanced Settings Entry Button
                 Row(

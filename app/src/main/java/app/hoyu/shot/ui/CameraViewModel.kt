@@ -1246,11 +1246,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleHdr() {
-        detachCustomPresetOnUserEdit()
-        val next = !_uiState.value.isHdrEnabled
-        _uiState.update { it.copy(isHdrEnabled = next) }
-        settingsRepo.savedHdrEnabled = next
-        cameraController.isHdrEnabled = next
+        // Deprecated
     }
 
     private fun detachCustomPresetOnUserEdit() {

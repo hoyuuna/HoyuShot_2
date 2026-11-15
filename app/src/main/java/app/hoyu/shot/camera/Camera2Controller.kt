@@ -1575,9 +1575,16 @@ class Camera2Controller(
                 previewRequestBuilder?.get(CaptureRequest.CONTROL_AE_MODE) == CaptureRequest.CONTROL_AE_MODE_ON &&
                 currentFlashMode == FlashMode.OFF &&
                 zslRequestKeys?.contains(CaptureRequest.CONTROL_ENABLE_ZSL) == true
-            val captureBuilder = device.createCaptureRequest(
-                if (useZsl) CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG else CameraDevice.TEMPLATE_STILL_CAPTURE
-            )
+
+            // CRITICAL LATENCY OPTIMIZATION:
+            // Standard STILL_CAPTURE template forces the HAL/ISP into multi-frame re-metering and AE/AWB re-settle (causing 0.2s-0.3s frame lag).
+            // Using TEMPLATE_PREVIEW (or ZSL when available) treats the capture request as the immediate next stream frame without sensor stalling.
+            val chosenTemplate = when {
+                useZsl -> CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
+                !willCaptureRaw && !useHdrBurst && currentFlashMode == FlashMode.OFF -> CameraDevice.TEMPLATE_PREVIEW
+                else -> CameraDevice.TEMPLATE_STILL_CAPTURE
+            }
+            val captureBuilder = device.createCaptureRequest(chosenTemplate)
 
             if (willCaptureJpeg) {
                 captureBuilder.addTarget(jpegImageReader!!.surface)
@@ -1661,6 +1668,10 @@ class Camera2Controller(
 
             if (useZsl && aeMode == CaptureRequest.CONTROL_AE_MODE_ON) {
                 captureBuilder.set(CaptureRequest.CONTROL_ENABLE_ZSL, true)
+            } else if (aeMode == CaptureRequest.CONTROL_AE_MODE_ON && currentFlashMode == FlashMode.OFF) {
+                // Lock AE/AWB during capture to prevent HAL from running extra 3A convergence iterations
+                captureBuilder.set(CaptureRequest.CONTROL_AE_LOCK, true)
+                captureBuilder.set(CaptureRequest.CONTROL_AWB_LOCK, true)
             }
 
             val snapIso = if (aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
