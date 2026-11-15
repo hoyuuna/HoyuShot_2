@@ -183,11 +183,11 @@ class SettingsRepository(context: Context) {
         set(value) = prefs.edit().putBoolean("adv_ui_blur", value).apply()
 
     var isAutoUpdateCheckEnabled: Boolean
-        get() = prefs.getBoolean("adv_auto_update_check", true)
+        get() = prefs.getBoolean("adv_auto_update_check", false)
         set(value) = prefs.edit().putBoolean("adv_auto_update_check", value).apply()
 
     var isPreReleaseUpdateEnabled: Boolean
-        get() = prefs.getBoolean("adv_prerelease_update", true)
+        get() = prefs.getBoolean("adv_prerelease_update", false)
         set(value) = prefs.edit().putBoolean("adv_prerelease_update", value).apply()
 
     var isTeleZoomFallbackEnabled: Boolean
