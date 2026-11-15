@@ -304,6 +304,7 @@ fun CameraScreen(
                             viewModel.setAspectRatio(next)
                         },
                         onToggleGrid = { viewModel.toggleGrid() },
+                        onToggleZeroMiss = { viewModel.toggleZeroShutterLag() },
                         onToggleFormatMenu = {
                             view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                             isFormatMenuVisible = !isFormatMenuVisible
@@ -437,6 +438,7 @@ fun CameraScreen(
                                 viewModel.setAspectRatio(next)
                             },
                             onToggleGrid = { viewModel.toggleGrid() },
+                            onToggleZeroMiss = { viewModel.toggleZeroShutterLag() },
                             onToggleFormatMenu = {
                                 view.triggerUiHaptic(uiState.uiHapticsMode == "VIBRATE")
                                 isFormatMenuVisible = !isFormatMenuVisible
@@ -818,6 +820,7 @@ private fun TopToolbar(
     onToggleAeLock: () -> Unit,
     onChangeRatio: () -> Unit,
     onToggleGrid: () -> Unit,
+    onToggleZeroMiss: () -> Unit,
     onToggleFormatMenu: () -> Unit
 ) {
     Row(
@@ -862,6 +865,14 @@ private fun TopToolbar(
                 isActive = uiState.gridMode != GridMode.NONE,
                 rotationDegrees = animatedRotation,
                 onClick = onToggleGrid
+            )
+
+            // HoyuShot Zero Miss Toggle Button
+            ShadcnTextButton(
+                text = "ZM",
+                isActive = uiState.isZeroShutterLagEnabled,
+                rotationDegrees = animatedRotation,
+                onClick = onToggleZeroMiss
             )
         }
 

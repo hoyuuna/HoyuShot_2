@@ -150,7 +150,7 @@ data class CameraUiState(
     val volumeDownAction: String = "SHUTTER",
     val antibandingMode: String = "AUTO",
     val isUiBlurEnabled: Boolean = true,
-    val isAutoUpdateCheckEnabled: Boolean = false,
+    val isAutoUpdateCheckEnabled: Boolean = true,
     val isPreReleaseUpdateEnabled: Boolean = false,
     val isTeleZoomFallbackEnabled: Boolean = true,
     val isExifSoftwareTagEnabled: Boolean = true,

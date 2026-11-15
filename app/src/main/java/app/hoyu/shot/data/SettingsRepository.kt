@@ -183,7 +183,7 @@ class SettingsRepository(context: Context) {
         set(value) = prefs.edit().putBoolean("adv_ui_blur", value).apply()
 
     var isAutoUpdateCheckEnabled: Boolean
-        get() = prefs.getBoolean("adv_auto_update_check", false)
+        get() = prefs.getBoolean("adv_auto_update_check", true)
         set(value) = prefs.edit().putBoolean("adv_auto_update_check", value).apply()
 
     var isPreReleaseUpdateEnabled: Boolean
