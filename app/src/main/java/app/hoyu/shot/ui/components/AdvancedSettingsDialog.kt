@@ -56,6 +56,7 @@ fun AdvancedSettingsDialog(
     onToggleTeleZoomFallback: () -> Unit = {},
     onToggleExifSoftwareTag: () -> Unit = {},
     onToggleHqViewport: () -> Unit = {},
+    onToggleZeroShutterLag: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -508,6 +509,16 @@ fun AdvancedSettingsDialog(
                     subtitle = if (uiState.isHqViewportEnabled) "Sharp high-res viewfinder (light NR/edge); photo capture keeps full quality" else "Zero-latency raw preview (lower res, NR/edge OFF on viewfinder only)",
                     isActive = uiState.isHqViewportEnabled,
                     onToggle = onToggleHqViewport
+                )
+
+                HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
+
+                // HoyuShot Zero Miss Toggle
+                SettingsToggleRow(
+                    title = "HOYUSHOT ZERO MISS",
+                    subtitle = if (uiState.isZeroShutterLagEnabled) "Continuous rolling in-memory buffer; captures exact instant finger touches shutter (0ms lag)" else "Standard capture pipeline with hardware re-metering",
+                    isActive = uiState.isZeroShutterLagEnabled,
+                    onToggle = onToggleZeroShutterLag
                 )
 
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)

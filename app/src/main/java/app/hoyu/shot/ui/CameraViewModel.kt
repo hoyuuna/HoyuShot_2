@@ -284,6 +284,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.isHdrEnabled = initHdrEnabled
         cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
         cameraController.isHqViewportEnabled = settingsRepo.isHqViewportEnabled
+        cameraController.isZeroShutterLagEnabled = settingsRepo.isZeroShutterLagEnabled
 
         _uiState.update {
             it.copy(
@@ -335,6 +336,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isTeleZoomFallbackEnabled = settingsRepo.isTeleZoomFallbackEnabled,
                 isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled,
                 isHqViewportEnabled = settingsRepo.isHqViewportEnabled,
+                isZeroShutterLagEnabled = settingsRepo.isZeroShutterLagEnabled,
                 customPresets = initCustomPresets,
                 activeCustomPresetId = initActiveCustomId,
                 colorProfile = initColorProfile,
@@ -1183,6 +1185,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun toggleZeroShutterLag() {
+        val next = !_uiState.value.isZeroShutterLagEnabled
+        _uiState.update { it.copy(isZeroShutterLagEnabled = next) }
+        settingsRepo.isZeroShutterLagEnabled = next
+        cameraController.isZeroShutterLagEnabled = next
+        cameraController.refreshAnalysisStream()
+    }
+
     fun toggleCameraFacing() {
         val currentIsFront = _uiState.value.currentLens?.isFront ?: false
         val targetLens = if (currentIsFront) {
@@ -1541,7 +1551,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setCaptureFormat(nextFormat)
     }
 
-    fun takePicture() {
+    fun takePicture(touchTimestampNanos: Long? = null) {
         if (_uiState.value.isCapturing) return
 
         val timer = _uiState.value.timerMode.seconds
@@ -1560,14 +1570,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(timerCountdownSeconds = null, isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
                 cameraController.takePicture(
                     captureRaw = _uiState.value.captureRaw,
-                    format = _uiState.value.captureFormat
+                    format = _uiState.value.captureFormat,
+                    touchTimestampNanos = null
                 )
             }
         } else {
             _uiState.update { it.copy(isCapturing = true, shutterBlinkTrigger = System.currentTimeMillis()) }
             cameraController.takePicture(
                 captureRaw = _uiState.value.captureRaw,
-                format = _uiState.value.captureFormat
+                format = _uiState.value.captureFormat,
+                touchTimestampNanos = touchTimestampNanos ?: android.os.SystemClock.elapsedRealtimeNanos()
             )
         }
     }
