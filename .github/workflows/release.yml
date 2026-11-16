@@ -53,16 +53,15 @@ jobs:
 
       - name: Build Signed Release APK
         run: |
+          OFFSET=46
+          BUILD_INDEX=$(( ${{ github.run_number }} - OFFSET ))
+          if [ $BUILD_INDEX -lt 0 ]; then BUILD_INDEX=0; fi
           VERSION="${{ inputs.custom_version }}"
           if [ -z "$VERSION" ]; then
-            OFFSET=46
-            BUILD_INDEX=$(( ${{ github.run_number }} - OFFSET ))
-            if [ $BUILD_INDEX -lt 0 ]; then BUILD_INDEX=0; fi
             VERSION="1.0.${BUILD_INDEX}"
-            VERSION_CODE="${{ github.run_number }}"
-          else
-            VERSION_CODE=$(echo "$VERSION" | awk -F. '{print $NF}')
           fi
+          # Ensure VERSION_CODE is always strictly monotonically increasing (using github.run_number)
+          VERSION_CODE="${{ github.run_number }}"
           ./gradlew assembleRelease \
             -PversionCode=$VERSION_CODE \
             -PversionName=$VERSION \
