@@ -285,6 +285,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled
         cameraController.isHqViewportEnabled = settingsRepo.isHqViewportEnabled
         cameraController.isZeroShutterLagEnabled = settingsRepo.isZeroShutterLagEnabled
+        cameraController.isDynamicZslEnabled = settingsRepo.isDynamicZslEnabled
 
         _uiState.update {
             it.copy(
@@ -337,6 +338,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isExifSoftwareTagEnabled = settingsRepo.isExifSoftwareTagEnabled,
                 isHqViewportEnabled = settingsRepo.isHqViewportEnabled,
                 isZeroShutterLagEnabled = settingsRepo.isZeroShutterLagEnabled,
+                isDynamicZslEnabled = settingsRepo.isDynamicZslEnabled,
                 customPresets = initCustomPresets,
                 activeCustomPresetId = initActiveCustomId,
                 colorProfile = initColorProfile,
@@ -1191,6 +1193,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsRepo.isZeroShutterLagEnabled = next
         cameraController.isZeroShutterLagEnabled = next
         cameraController.refreshAnalysisStream()
+    }
+
+    fun toggleDynamicZsl() {
+        val next = !_uiState.value.isDynamicZslEnabled
+        _uiState.update { it.copy(isDynamicZslEnabled = next) }
+        settingsRepo.isDynamicZslEnabled = next
+        cameraController.isDynamicZslEnabled = next
     }
 
     fun toggleCameraFacing() {

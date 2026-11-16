@@ -178,6 +178,10 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean("adv_zsl_enabled", false)
         set(value) = prefs.edit().putBoolean("adv_zsl_enabled", value).apply()
 
+    var isDynamicZslEnabled: Boolean
+        get() = prefs.getBoolean("adv_dynamic_zsl_enabled", true)
+        set(value) = prefs.edit().putBoolean("adv_dynamic_zsl_enabled", value).apply()
+
     var isUiBlurEnabled: Boolean
         get() = prefs.getBoolean("adv_ui_blur", true)
         set(value) = prefs.edit().putBoolean("adv_ui_blur", value).apply()

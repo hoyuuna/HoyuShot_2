@@ -104,6 +104,9 @@ class Camera2Controller(
     @Volatile var isBlurBackdropNeeded: Boolean = false
     @Volatile var isHqViewportEnabled: Boolean = true
     @Volatile var isZeroShutterLagEnabled: Boolean = false
+    @Volatile var isDynamicZslEnabled: Boolean = true
+    @Volatile private var isAfFocusedOrActive: Boolean = false
+    @Volatile private var lastAfFocusAcquiredTimeMs: Long = 0L
     @Volatile var colorProfile: ColorProfile = ColorProfile.NATURAL
     @Volatile var isHdrEnabled: Boolean = false
 
@@ -135,11 +138,18 @@ class Camera2Controller(
     private var isZslTargetAttached: Boolean = false
 
     private fun isZslEligible(): Boolean {
-        return isZeroShutterLagEnabled &&
-            !isRawCaptureEnabled &&
-            captureFormat == CaptureFormat.JPEG &&
-            currentFlashMode == FlashMode.OFF &&
-            lastMeasuredShutter < 200_000_000L
+        if (!isZeroShutterLagEnabled || isRawCaptureEnabled || captureFormat != CaptureFormat.JPEG) return false
+        if (currentFlashMode != FlashMode.OFF || lastMeasuredShutter >= 200_000_000L) return false
+
+        // Dynamic HZM: if enabled, only buffer when camera has detected focus or is actively focusing,
+        // or when manual focus is active.
+        if (isDynamicZslEnabled && !currentIsManualFocus) {
+            val isFocusedRecently = isAfFocusedOrActive || (System.currentTimeMillis() - lastAfFocusAcquiredTimeMs <= 1800L)
+            if (!isFocusedRecently) {
+                return false
+            }
+        }
+        return true
     }
     // so CameraBackgroundThread stays free for zero-lag shutter & ImageReader callbacks.
     private val postProcessExecutor = Executors.newFixedThreadPool(2)
@@ -896,6 +906,18 @@ class Camera2Controller(
             lastMeasuredIso = iso
             lastMeasuredShutter = shutter
             onFrameMetadata(iso, shutter)
+
+            // Dynamic HZM AF State Tracking
+            val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+            val isFocusedNow = afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN
+            if (isFocusedNow) {
+                lastAfFocusAcquiredTimeMs = System.currentTimeMillis()
+                isAfFocusedOrActive = true
+            } else if (System.currentTimeMillis() - lastAfFocusAcquiredTimeMs > 1800L) {
+                isAfFocusedOrActive = false
+            }
 
             // When in Auto or Program mode with limits active and NOT yet clamped:
             // Intervene the moment native AE breaches the user-defined bounds (after any release cooldown)

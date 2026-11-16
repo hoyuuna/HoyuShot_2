@@ -772,6 +772,7 @@ fun CameraScreen(
             onToggleExifSoftwareTag = { viewModel.toggleExifSoftwareTag() },
             onToggleHqViewport = { viewModel.toggleHqViewport() },
             onToggleZeroShutterLag = { viewModel.toggleZeroShutterLag() },
+            onToggleDynamicZsl = { viewModel.toggleDynamicZsl() },
             onDismiss = {
                 isAdvancedSettingsVisible = false
                 scrollToUpdates = false

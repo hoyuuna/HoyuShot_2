@@ -156,6 +156,7 @@ data class CameraUiState(
     val isExifSoftwareTagEnabled: Boolean = true,
     val isHqViewportEnabled: Boolean = true,
     val isZeroShutterLagEnabled: Boolean = false,
+    val isDynamicZslEnabled: Boolean = true,
 
     // Real-time sensor states
     val histogram: HistogramData = HistogramData(),

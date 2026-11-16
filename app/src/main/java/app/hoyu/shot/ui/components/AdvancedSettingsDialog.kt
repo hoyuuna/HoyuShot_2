@@ -57,6 +57,7 @@ fun AdvancedSettingsDialog(
     onToggleExifSoftwareTag: () -> Unit = {},
     onToggleHqViewport: () -> Unit = {},
     onToggleZeroShutterLag: () -> Unit = {},
+    onToggleDynamicZsl: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -325,6 +326,19 @@ fun AdvancedSettingsDialog(
                     subtitle = if (uiState.isZeroShutterLagEnabled) "Burst-buffers frames into RAM to capture the exact instant finger touches shutter. Warning: High RAM, CPU, battery usage & causes device heating." else "Standard capture pipeline without background frame buffering",
                     isActive = uiState.isZeroShutterLagEnabled,
                     onToggle = onToggleZeroShutterLag
+                )
+
+                // Dynamic HZM Toggle (Focus-gated buffer)
+                SettingsToggleRow(
+                    title = "DYNAMIC HZM",
+                    subtitle = when {
+                        !uiState.isZeroShutterLagEnabled -> "Requires HOYUSHOT ZERO MISS to be enabled"
+                        uiState.isDynamicZslEnabled -> "Only buffers frames when focus is locked or actively tracking; saves battery & reduces heat"
+                        else -> "Continuously buffers frames regardless of focus state"
+                    },
+                    isActive = uiState.isDynamicZslEnabled,
+                    enabled = uiState.isZeroShutterLagEnabled,
+                    onToggle = onToggleDynamicZsl
                 )
 
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
@@ -834,18 +848,42 @@ private fun SettingsToggleRow(
     title: String,
     subtitle: String,
     isActive: Boolean,
+    enabled: Boolean = true,
     onToggle: () -> Unit
 ) {
     val view = LocalView.current
     val uiHapticsEnabled = LocalUiHapticsEnabled.current
     val shape = RoundedCornerShape(2.dp)
+    val backgroundColor = when {
+        !enabled -> Color(0xFF141416)
+        isActive -> Color(0x22E11D48)
+        else -> Color(0xFF18181B)
+    }
+    val borderColor = when {
+        !enabled -> Color(0xFF1F1F23)
+        isActive -> Color(0xFFE11D48)
+        else -> Color(0xFF27272A)
+    }
+    val titleColor = when {
+        !enabled -> Color(0xFF52525B)
+        isActive -> Color(0xFFFF4D6D)
+        else -> Color(0xFFFAFAFA)
+    }
+    val subtitleColor = if (enabled) Color(0xFF71717A) else Color(0xFF3F3F46)
+    val pillBgColor = when {
+        !enabled -> Color(0xFF202024)
+        isActive -> Color(0xFFE11D48)
+        else -> Color(0xFF27272A)
+    }
+    val pillTextColor = if (enabled) Color.White else Color(0xFF52525B)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (isActive) Color(0x22E11D48) else Color(0xFF18181B))
-            .border(1.dp, if (isActive) Color(0xFFE11D48) else Color(0xFF27272A), shape)
-            .clickable {
+            .background(backgroundColor)
+            .border(1.dp, borderColor, shape)
+            .clickable(enabled = enabled) {
                 view.triggerUiHaptic(uiHapticsEnabled)
                 onToggle()
             }
@@ -860,7 +898,7 @@ private fun SettingsToggleRow(
         ) {
             Text(
                 text = title,
-                color = if (isActive) Color(0xFFFF4D6D) else Color(0xFFFAFAFA),
+                color = titleColor,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
@@ -868,7 +906,7 @@ private fun SettingsToggleRow(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
-                color = Color(0xFF71717A),
+                color = subtitleColor,
                 fontSize = 8.sp,
                 fontFamily = FontFamily.Monospace
             )
@@ -877,13 +915,13 @@ private fun SettingsToggleRow(
         Box(
             modifier = Modifier
                 .clip(shape)
-                .background(if (isActive) Color(0xFFE11D48) else Color(0xFF27272A))
+                .background(pillBgColor)
                 .padding(horizontal = 9.dp, vertical = 5.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = if (isActive) "ON" else "OFF",
-                color = Color.White,
+                color = pillTextColor,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Monospace
