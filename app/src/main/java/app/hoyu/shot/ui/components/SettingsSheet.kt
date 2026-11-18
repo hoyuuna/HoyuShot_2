@@ -57,6 +57,7 @@ fun SettingsDialog(
     onToggleZebra: () -> Unit,
     onToggleSunCompass: () -> Unit = {},
     onToggleHdr: () -> Unit = {},
+    pluginManager: app.hoyu.shot.plugin.PluginManager? = null,
     onOpenAdvancedSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -288,12 +289,13 @@ fun SettingsDialog(
                 }
 
                 // 2b. Color Profile Engine (OFF / NAT / VIV)
+                val overridingColorPlugin = pluginManager?.isColorEngineOverridden()
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(Color(0xFF18181B))
-                        .border(1.dp, Color(0xFF27272A), shape)
+                        .background(if (overridingColorPlugin != null) Color(0xFF141416) else Color(0xFF18181B))
+                        .border(1.dp, if (overridingColorPlugin != null) Color(0xFF1F1F23) else Color(0xFF27272A), shape)
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -304,31 +306,52 @@ fun SettingsDialog(
                     ) {
                         Text(
                             text = "COLOR // ENGINE",
-                            color = Color(0xFFA1A1AA),
+                            color = if (overridingColorPlugin != null) Color(0xFF71717A) else Color(0xFFA1A1AA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            text = uiState.colorProfile.fullName.uppercase(),
-                            color = if (uiState.colorProfile != ColorProfile.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
-                            fontSize = 9.sp,
+                            text = if (overridingColorPlugin != null) {
+                                "OVERRIDDEN BY ${overridingColorPlugin.uppercase()}"
+                            } else {
+                                uiState.colorProfile.fullName.uppercase()
+                            },
+                            color = if (overridingColorPlugin != null) Color(0xFFE11D48) else if (uiState.colorProfile != ColorProfile.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                     }
+
+                    if (overridingColorPlugin != null) {
+                        Text(
+                            text = "Disabled: Active plugin overrides colorimetry & tone processing.",
+                            color = Color(0xFFE11D48),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         ColorProfile.entries.forEach { profile ->
                             val selected = uiState.colorProfile == profile
+                            val isItemEnabled = overridingColorPlugin == null
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(shape)
-                                    .background(if (selected) Color(0xFFE11D48) else Color(0xFF27272A))
-                                    .clickable {
+                                    .background(
+                                        when {
+                                            !isItemEnabled -> Color(0xFF18181B)
+                                            selected -> Color(0xFFE11D48)
+                                            else -> Color(0xFF27272A)
+                                        }
+                                    )
+                                    .clickable(enabled = isItemEnabled) {
                                         view.triggerUiHaptic(uiHapticsEnabled)
                                         onSelectColorProfile(profile)
                                     }
@@ -337,7 +360,11 @@ fun SettingsDialog(
                             ) {
                                 Text(
                                     text = profile.label,
-                                    color = if (selected) Color(0xFFFAFAFA) else Color(0xFFA1A1AA),
+                                    color = when {
+                                        !isItemEnabled -> Color(0xFF52525B)
+                                        selected -> Color(0xFFFAFAFA)
+                                        else -> Color(0xFFA1A1AA)
+                                    },
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace

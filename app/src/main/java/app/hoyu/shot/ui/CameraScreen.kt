@@ -742,6 +742,7 @@ fun CameraScreen(
                 }
             },
             onToggleHdr = { viewModel.toggleHdr() },
+            pluginManager = viewModel.pluginManager,
             onOpenAdvancedSettings = {
                 isSettingsDialogVisible = false
                 isAdvancedSettingsVisible = true

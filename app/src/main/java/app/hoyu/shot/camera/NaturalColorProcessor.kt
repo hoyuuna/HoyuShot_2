@@ -20,8 +20,15 @@ import kotlin.math.sin
  */
 object NaturalColorProcessor {
 
-    fun processBitmapInPlace(bitmap: Bitmap, profile: ColorProfile) {
-        if (profile == ColorProfile.OFF || !bitmap.isMutable) return
+    fun processBitmapInPlace(
+        bitmap: Bitmap,
+        profile: ColorProfile,
+        gainR: Float = 1.0f,
+        gainG: Float = 1.0f,
+        gainB: Float = 1.0f,
+        satMultiplier: Float = 1.0f
+    ) {
+        if ((profile == ColorProfile.OFF && gainR == 1.0f && gainG == 1.0f && gainB == 1.0f && satMultiplier == 1.0f) || !bitmap.isMutable) return
         val width = bitmap.width
         val height = bitmap.height
         if (width < 4 || height < 4) return
@@ -102,7 +109,7 @@ object NaturalColorProcessor {
             val dummyY = FloatArray(width)
             for (y in 0 until height) {
                 bitmap.getPixels(lineBuffer, 0, width, 0, y, width, 1)
-                applyToneAndVibranceRow(lineBuffer, dummyY, width, lumaLut, vibranceStrength)
+                applyToneAndVibranceRow(lineBuffer, dummyY, width, lumaLut, vibranceStrength, gainR, gainG, gainB, satMultiplier)
                 bitmap.setPixels(lineBuffer, 0, width, 0, y, width, 1)
             }
             return
@@ -119,7 +126,7 @@ object NaturalColorProcessor {
 
         // Pre-process row 0
         bitmap.getPixels(currPixels, 0, width, 0, 0, width, 1)
-        applyToneAndVibranceRow(currPixels, currY, width, lumaLut, vibranceStrength)
+        applyToneAndVibranceRow(currPixels, currY, width, lumaLut, vibranceStrength, gainR, gainG, gainB, satMultiplier)
         System.arraycopy(currPixels, 0, prevPixels, 0, width)
         System.arraycopy(currY, 0, prevY, 0, width)
 
@@ -128,7 +135,7 @@ object NaturalColorProcessor {
         for (y in 0 until height) {
             if (y + 1 < height) {
                 bitmap.getPixels(nextPixels, 0, width, 0, y + 1, width, 1)
-                applyToneAndVibranceRow(nextPixels, nextY, width, lumaLut, vibranceStrength)
+                applyToneAndVibranceRow(nextPixels, nextY, width, lumaLut, vibranceStrength, gainR, gainG, gainB, satMultiplier)
             } else {
                 System.arraycopy(currPixels, 0, nextPixels, 0, width)
                 System.arraycopy(currY, 0, nextY, 0, width)
@@ -177,13 +184,26 @@ object NaturalColorProcessor {
         outY: FloatArray,
         width: Int,
         lumaLut: FloatArray,
-        vibranceStrength: Float
+        vibranceStrength: Float,
+        gainR: Float = 1.0f,
+        gainG: Float = 1.0f,
+        gainB: Float = 1.0f,
+        globalSatMultiplier: Float = 1.0f
     ) {
+        val hasGainCorrection = gainR != 1.0f || gainG != 1.0f || gainB != 1.0f
+        val hasSatCompression = globalSatMultiplier < 0.999f
+
         for (x in 0 until width) {
             val px = pixels[x]
-            val rIn = (px ushr 16) and 0xFF
-            val gIn = (px ushr 8) and 0xFF
-            val bIn = px and 0xFF
+            var rIn = (px ushr 16) and 0xFF
+            var gIn = (px ushr 8) and 0xFF
+            var bIn = px and 0xFF
+
+            if (hasGainCorrection) {
+                rIn = (rIn * gainR).roundToInt().coerceIn(0, 255)
+                gIn = (gIn * gainG).roundToInt().coerceIn(0, 255)
+                bIn = (bIn * gainB).roundToInt().coerceIn(0, 255)
+            }
 
             val yOld = 0.299f * rIn + 0.587f * gIn + 0.114f * bIn
             val yIdx = yOld.roundToInt().coerceIn(0, 255)
@@ -208,6 +228,10 @@ object NaturalColorProcessor {
                 // Boost muted colors more than already-saturated colors
                 var boost = vibranceStrength * (1f - sat).pow(1.4f)
 
+                if (hasSatCompression) {
+                    boost = boost * globalSatMultiplier - (1f - globalSatMultiplier) * sat * 0.25f
+                }
+
                 // Protect warm human skin tones (R > G > B in ~10..45 deg hue band)
                 if (rTone > gTone && gTone > bTone && delta > 10f) {
                     val rg = rTone - gTone
@@ -222,7 +246,7 @@ object NaturalColorProcessor {
 
                 // Softly reduce vibrance near blown highlights so bright clouds stay white
                 val highlightGuard = ((250f - maxC) / 35f).coerceIn(0.25f, 1f)
-                val satGain = 1f + boost * highlightGuard
+                val satGain = (1f + boost * highlightGuard).coerceAtLeast(0.1f)
 
                 rOut = (yNew + (rTone - yNew) * satGain).coerceIn(0f, 255f)
                 gOut = (yNew + (gTone - yNew) * satGain).coerceIn(0f, 255f)

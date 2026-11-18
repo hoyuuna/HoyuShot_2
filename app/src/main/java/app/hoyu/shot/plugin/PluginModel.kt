@@ -68,6 +68,7 @@ data class PluginManifest(
     val author: String,
     val description: String,
     val gitUrl: String = "",
+    val overrides: List<String> = emptyList(),
     val settings: List<PluginSettingItem> = emptyList()
 ) {
     companion object {
@@ -78,6 +79,15 @@ data class PluginManifest(
             val version = obj.optString("version", "1.0.0")
             val author = obj.optString("author", "Community")
             val desc = obj.optString("description", "HoyuShot Git Plugin")
+
+            val overridesList = mutableListOf<String>()
+            val overridesArr = obj.optJSONArray("overrides")
+            if (overridesArr != null) {
+                for (i in 0 until overridesArr.length()) {
+                    overridesList.add(overridesArr.getString(i))
+                }
+            }
+
             val settingsList = mutableListOf<PluginSettingItem>()
             val settingsArr = obj.optJSONArray("settings")
             if (settingsArr != null) {
@@ -93,6 +103,7 @@ data class PluginManifest(
                 author = author,
                 description = desc,
                 gitUrl = gitUrl,
+                overrides = overridesList,
                 settings = settingsList
             )
         }

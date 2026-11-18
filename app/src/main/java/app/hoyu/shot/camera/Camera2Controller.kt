@@ -2345,7 +2345,8 @@ class Camera2Controller(
         val chars = snapshot.characteristics
         val isFrontCam = chars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
         val shouldMirror = isFrontCam && isMirrorSelfie
-        val shouldApplyColor = colorProfile != ColorProfile.OFF
+        val hasActivePlugin = pluginManager.hasActivePhotoProcessPlugin()
+        val shouldApplyColor = colorProfile != ColorProfile.OFF || hasActivePlugin
         val shouldApplyHdr = hdrUnderBytes != null && hdrOverBytes != null
         var wasReencodedUpright = false
         var preservedExifOrientation = ExifInterface.ORIENTATION_UNDEFINED
@@ -2370,7 +2371,95 @@ class Camera2Controller(
                         HdrProcessor.mergeHdrInPlace(origBitmap, hdrUnderBytes!!, hdrOverBytes!!)
                     }
                     if (shouldApplyColor) {
-                        NaturalColorProcessor.processBitmapInPlace(origBitmap, colorProfile)
+                        var pGainR = 1.0f
+                        var pGainG = 1.0f
+                        var pGainB = 1.0f
+                        var pSatMult = 1.0f
+
+                        if (hasActivePlugin) {
+                            try {
+                                // Extract scene colorimetry metrics from sampling
+                                val bmW = origBitmap.width
+                                val bmH = origBitmap.height
+                                val sY = kotlin.math.max(1, bmH / 128)
+                                val sX = kotlin.math.max(1, bmW / 128)
+                                val rowBuf = IntArray(bmW)
+                                var sCount = 0
+                                var sumR = 0.0
+                                var sumG = 0.0
+                                var sumB = 0.0
+                                var sumSat = 0.0
+                                var cR = 0
+                                var cG = 0
+                                var cB = 0
+
+                                var curY = 0
+                                while (curY < bmH) {
+                                    origBitmap.getPixels(rowBuf, 0, bmW, 0, curY, bmW, 1)
+                                    var curX = 0
+                                    while (curX < bmW) {
+                                        val pxl = rowBuf[curX]
+                                        val r = (pxl ushr 16) and 0xFF
+                                        val g = (pxl ushr 8) and 0xFF
+                                        val b = pxl and 0xFF
+                                        sumR += r
+                                        sumG += g
+                                        sumB += b
+                                        if (r >= 254) cR++
+                                        if (g >= 254) cG++
+                                        if (b >= 254) cB++
+                                        val maxC = kotlin.math.max(r, kotlin.math.max(g, b))
+                                        val minC = kotlin.math.min(r, kotlin.math.min(g, b))
+                                        val delta = maxC - minC
+                                        sumSat += if (maxC > 0) delta.toDouble() / maxC.toDouble() else 0.0
+                                        sCount++
+                                        curX += sX
+                                    }
+                                    curY += sY
+                                }
+
+                                if (sCount > 0) {
+                                    val avgR = (sumR / sCount).toFloat()
+                                    val avgG = (sumG / sCount).toFloat()
+                                    val avgB = (sumB / sCount).toFloat()
+                                    val avgSatPct = ((sumSat / sCount) * 100.0).toFloat()
+                                    val maxClipPct = (kotlin.math.max(cR, kotlin.math.max(cG, cB)).toDouble() / sCount * 100.0).toFloat()
+
+                                    val pluginOutputs = pluginManager.applyProcessPhotoHooks(
+                                        avgR = avgR,
+                                        avgG = avgG,
+                                        avgB = avgB,
+                                        avgSatPercent = avgSatPct,
+                                        maxClipPercent = maxClipPct
+                                    )
+
+                                    if (pluginOutputs.containsKey("gainR")) {
+                                        pGainR = (pluginOutputs["gainR"] as? Number)?.toFloat() ?: 1.0f
+                                    }
+                                    if (pluginOutputs.containsKey("gainG")) {
+                                        pGainG = (pluginOutputs["gainG"] as? Number)?.toFloat() ?: 1.0f
+                                    }
+                                    if (pluginOutputs.containsKey("gainB")) {
+                                        pGainB = (pluginOutputs["gainB"] as? Number)?.toFloat() ?: 1.0f
+                                    }
+                                    if (pluginOutputs.containsKey("satMultiplier")) {
+                                        pSatMult = (pluginOutputs["satMultiplier"] as? Number)?.toFloat() ?: 1.0f
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error executing plugin onProcessPhoto hook: ${e.message}")
+                            }
+                        }
+
+                        val targetProfile = if (hasActivePlugin && colorProfile == ColorProfile.OFF) ColorProfile.NATURAL else colorProfile
+                        NaturalColorProcessor.processBitmapInPlace(
+                            bitmap = origBitmap,
+                            profile = targetProfile,
+                            gainR = pGainR,
+                            gainG = pGainG,
+                            gainB = pGainB,
+                            satMultiplier = pSatMult
+                        )
                     }
                     val outBitmap = if (shouldMirror) {
                         val rotDeg = when {

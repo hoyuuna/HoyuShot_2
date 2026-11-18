@@ -317,6 +317,32 @@ class PluginManager(private val context: Context) {
         return result
     }
 
+    fun isColorEngineOverridden(): String? {
+        val active = _installedPlugins.value.filter { it.isEnabled }
+        for (plugin in active) {
+            val hasExplicit = plugin.manifest.overrides.any { it.equals("COLOR_ENGINE", ignoreCase = true) || it.equals("COLOR", ignoreCase = true) }
+            val hasHook = plugin.scriptCode.contains("onProcessPhoto")
+            if (hasExplicit || hasHook) {
+                return plugin.manifest.name
+            }
+        }
+        return null
+    }
+
+    fun isFeatureOverridden(featureKey: String): String? {
+        val active = _installedPlugins.value.filter { it.isEnabled }
+        for (plugin in active) {
+            if (plugin.manifest.overrides.any { it.equals(featureKey, ignoreCase = true) }) {
+                return plugin.manifest.name
+            }
+        }
+        return null
+    }
+
+    fun hasActivePhotoProcessPlugin(): Boolean {
+        return _installedPlugins.value.any { it.isEnabled && it.scriptCode.contains("onProcessPhoto") }
+    }
+
     fun applyProcessPhotoHooks(
         avgR: Float,
         avgG: Float,

@@ -556,17 +556,16 @@ fun AdvancedSettingsDialog(
                 // SECTION 4: PLUGINS & EXTENSIONS
                 // ==========================================
                 if (pluginManager != null) {
-                    SectionHeader("04 // PLUGINS & EXTENSIONS")
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    Text(
-                        text = "Install custom plugins from any public Git repository. Plugins can override camera capture parameters and provide custom settings.",
-                        color = Color(0xFFA1A1AA),
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        lineHeight = 13.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SectionHeader("04 // PLUGINS & EXTENSIONS")
+                        Text(
+                            text = "Install custom plugins from any public Git repository.",
+                            color = Color(0xFF71717A),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 11.sp
+                        )
+                    }
 
                     Button(
                         onClick = {
@@ -588,8 +587,6 @@ fun AdvancedSettingsDialog(
                             fontFamily = FontFamily.Monospace
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
 
                     if (installedPlugins.isEmpty()) {
                         Box(
