@@ -1009,7 +1009,7 @@ fun AdvancedSettingsDialog(
     }
 
     // Dialog: Plugin Settings Custom Config Sheet (Overlaid with same dimensions as Advanced Settings)
-    if (selectedPluginForConfig != null && pluginManager != null) {
+    if (pluginManager != null) {
         PluginSettingsDialog(
             visible = selectedPluginForConfig != null,
             plugin = selectedPluginForConfig,

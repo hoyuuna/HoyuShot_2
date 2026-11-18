@@ -37,7 +37,11 @@ fun PluginSettingsDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (plugin == null) return
+    var lastPlugin by remember { mutableStateOf<PluginInstance?>(null) }
+    if (plugin != null) {
+        lastPlugin = plugin
+    }
+    val activePlugin = plugin ?: lastPlugin ?: return
 
     val view = LocalView.current
     val uiHapticsEnabled = LocalUiHapticsEnabled.current
@@ -45,18 +49,18 @@ fun PluginSettingsDialog(
     val scrollState = rememberScrollState()
     val currentSettings = remember { mutableStateMapOf<String, Any>() }
 
-    LaunchedEffect(plugin.manifest.id, visible) {
+    LaunchedEffect(activePlugin.manifest.id, visible) {
         if (visible) {
-            val saved = pluginManager.getPluginSettings(plugin.manifest.id)
+            val saved = pluginManager.getPluginSettings(activePlugin.manifest.id)
             currentSettings.clear()
             currentSettings.putAll(saved)
         }
     }
 
     AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
-        exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.95f),
+        visible = visible && plugin != null,
+        enter = fadeIn(tween(200)) + scaleIn(tween(200), initialScale = 0.92f) + slideInVertically(tween(200), initialOffsetY = { it / 10 }),
+        exit = fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.92f) + slideOutVertically(tween(150), targetOffsetY = { it / 10 }),
         modifier = modifier.fillMaxSize()
     ) {
         Box(
@@ -102,7 +106,7 @@ fun PluginSettingsDialog(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "PLUGIN // ${plugin.manifest.name.uppercase()}",
+                                text = "PLUGIN // ${activePlugin.manifest.name.uppercase()}",
                                 color = Color(0xFFFAFAFA),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black,
@@ -111,7 +115,7 @@ fun PluginSettingsDialog(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "v${plugin.manifest.version} • by ${plugin.manifest.author}",
+                                text = "v${activePlugin.manifest.version} • by ${activePlugin.manifest.author}",
                                 color = Color(0xFF71717A),
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace
@@ -138,9 +142,9 @@ fun PluginSettingsDialog(
                         }
                     }
 
-                    if (plugin.manifest.description.isNotBlank()) {
+                    if (activePlugin.manifest.description.isNotBlank()) {
                         Text(
-                            text = plugin.manifest.description,
+                            text = activePlugin.manifest.description,
                             color = Color(0xFFA1A1AA),
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
@@ -150,7 +154,7 @@ fun PluginSettingsDialog(
 
                     HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
-                    if (plugin.manifest.settings.isEmpty()) {
+                    if (activePlugin.manifest.settings.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -172,7 +176,7 @@ fun PluginSettingsDialog(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            plugin.manifest.settings.forEach { item ->
+                            activePlugin.manifest.settings.forEach { item ->
                                 when (item.type) {
                                     SettingType.TOGGLE -> {
                                         val checked = (currentSettings[item.key] as? Boolean)
@@ -189,7 +193,7 @@ fun PluginSettingsDialog(
                                                     view.triggerUiHaptic(uiHapticsEnabled)
                                                     val next = !checked
                                                     currentSettings[item.key] = next
-                                                    pluginManager.savePluginSetting(plugin.manifest.id, item.key, next)
+                                                    pluginManager.savePluginSetting(activePlugin.manifest.id, item.key, next)
                                                 }
                                                 .padding(12.dp),
                                             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -285,7 +289,7 @@ fun PluginSettingsDialog(
                                                 onValueChangeFinished = {
                                                     view.triggerUiHaptic(uiHapticsEnabled)
                                                     currentSettings[item.key] = sliderVal
-                                                    pluginManager.savePluginSetting(plugin.manifest.id, item.key, sliderVal)
+                                                    pluginManager.savePluginSetting(activePlugin.manifest.id, item.key, sliderVal)
                                                 },
                                                 valueRange = item.min..item.max,
                                                 colors = SliderDefaults.colors(
@@ -345,7 +349,7 @@ fun PluginSettingsDialog(
                                                             .clickable {
                                                                 view.triggerUiHaptic(uiHapticsEnabled)
                                                                 currentSettings[item.key] = opt
-                                                                pluginManager.savePluginSetting(plugin.manifest.id, item.key, opt)
+                                                                pluginManager.savePluginSetting(activePlugin.manifest.id, item.key, opt)
                                                             }
                                                             .padding(vertical = 7.dp),
                                                         contentAlignment = Alignment.Center
