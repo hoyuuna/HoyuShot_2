@@ -306,29 +306,16 @@ fun SettingsDialog(
                     ) {
                         Text(
                             text = "COLOR // ENGINE",
-                            color = if (overridingColorPlugin != null) Color(0xFF71717A) else Color(0xFFA1A1AA),
+                            color = Color(0xFFA1A1AA),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            text = if (overridingColorPlugin != null) {
-                                "OVERRIDDEN BY ${overridingColorPlugin.uppercase()}"
-                            } else {
-                                uiState.colorProfile.fullName.uppercase()
-                            },
-                            color = if (overridingColorPlugin != null) Color(0xFFE11D48) else if (uiState.colorProfile != ColorProfile.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
-                            fontSize = 8.sp,
+                            text = uiState.colorProfile.fullName.uppercase(),
+                            color = if (uiState.colorProfile != ColorProfile.OFF) Color(0xFFE11D48) else Color(0xFF71717A),
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    if (overridingColorPlugin != null) {
-                        Text(
-                            text = "Disabled: Active plugin overrides colorimetry & tone processing.",
-                            color = Color(0xFFE11D48),
-                            fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace
                         )
                     }
@@ -371,6 +358,15 @@ fun SettingsDialog(
                                 )
                             }
                         }
+                    }
+
+                    if (overridingColorPlugin != null) {
+                        Text(
+                            text = "Overridden by $overridingColorPlugin",
+                            color = Color(0xFFE11D48),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
 
