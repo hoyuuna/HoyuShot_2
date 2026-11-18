@@ -12,7 +12,7 @@ Every HoyuShot plugin must be a valid Git repository containing at least two cor
 
 ```
 my-hoyushot-plugin/
-├── plugin.json       # (Required) Metadata and custom settings schema definition
+├── plugin.json       # (Required) Metadata, overrides declaration, and settings schema
 ├── index.js          # (Required) JavaScript source containing lifecycle hooks
 └── README.md         # (Recommended) Documentation for users and developers
 ```
@@ -21,41 +21,42 @@ my-hoyushot-plugin/
 
 ## 2. Configuration Schema: `plugin.json`
 
-The `plugin.json` file declares your plugin identity and defines the schema for the auto-generated Settings Sheet.
+The `plugin.json` file declares your plugin identity, features that your plugin overrides, and defines the schema for the auto-generated Settings Sheet.
 
 ### Full Example:
 ```json
 {
-  "id": "com.developer.nightvision",
-  "name": "NIGHT VISION ASSIST PRO",
+  "id": "com.developer.colorimetry.nat",
+  "name": "NATURAL COLORIMETRY PRO",
   "version": "1.0.0",
   "author": "Your Name",
-  "description": "Automatically enhances low-light visibility and exposure pacing in dark scenes.",
+  "description": "Industrial color balance: neutral surface tint removal, saturation guard, and gamut highlight compression.",
+  "overrides": ["COLOR_ENGINE"],
   "settings": [
     {
-      "key": "enableNightBoost",
-      "title": "Night Vision Boost",
-      "description": "Automatically boosts sensor ISO when ambient light is critically low",
+      "key": "enableTintCorrection",
+      "title": "Neutral Tint Balancer",
+      "description": "Neutralize warm/cool/magenta/green casts on midtone gray surfaces",
       "type": "TOGGLE",
       "defaultValue": true
     },
     {
-      "key": "maxIsoTarget",
-      "title": "Maximum ISO Cap",
-      "description": "Upper threshold limit for automatic sensor gain",
+      "key": "targetEvBias",
+      "title": "Highlight EV Bias",
+      "description": "Pre-capture exposure offset to protect specular highlights",
       "type": "SLIDER",
-      "defaultValue": 1600,
-      "min": 100,
-      "max": 6400,
-      "step": 100
+      "defaultValue": 0,
+      "min": -4,
+      "max": 4,
+      "step": 1
     },
     {
-      "key": "shutterStyle",
-      "title": "Shutter Priority Style",
-      "description": "Choose between motion freeze or maximum light gathering",
+      "key": "processingMode",
+      "title": "Rendering Profile",
+      "description": "Target color science rendition",
       "type": "DROPDOWN",
-      "defaultValue": "BALANCED",
-      "options": ["FAST_ACTION", "BALANCED", "LONG_EXPOSURE"]
+      "defaultValue": "ACCURATE",
+      "options": ["ACCURATE", "VIBRANT", "NEUTRAL_FLAT"]
     }
   ]
 }
@@ -64,11 +65,13 @@ The `plugin.json` file declares your plugin identity and defines the schema for 
 ### Property Reference:
 - **`id`** *(string)*: Unique reverse-DNS identifier (lowercase, alphanumeric and dots, e.g., `com.example.filter`).
 - **`name`** *(string)*: Display name shown on the plugin card in HoyuShot.
-- **`version`** *(string)*: Semantic version string (e.g., `1.0.0`).
+- **`version`** *(string)*: Semantic version string (e.g., `1.0.0`). When bumped on Git, HoyuShot detects it and shows a 1-tap `[UPDATE AVAILABLE]` button.
 - **`author`** *(string)*: Developer or community handle.
 - **`description`** *(string)*: Brief overview of plugin functionality.
+- **`overrides`** *(array of strings, optional)*: Declares which native app features this plugin takes over:
+  - `"COLOR_ENGINE"`: Overrides native color/tone processing. When active, HoyuShot automatically **disables** the native `COLOR // ENGINE` selector and displays a badge showing which plugin currently owns the pipeline.
 - **`settings`** *(array)*: List of configurable options. Each item automatically generates a native Compose UI control:
-  - **`key`**: Unique identifier for the parameter (passed to JavaScript as `pluginSettings[key]`).
+  - **`key`**: Unique identifier for the parameter (passed to JavaScript as `settings[key]` and `pluginSettings[key]`).
   - **`title`**: Label rendered above the control.
   - **`description`**: Explanatory subtitle.
   - **`type`**: Supported input control types:
@@ -81,43 +84,37 @@ The `plugin.json` file declares your plugin identity and defines the schema for 
 
 ## 3. Script Engine & Lifecycle Hooks: `index.js`
 
-Mã JavaScript is executed in a sandboxed, low-overhead **QuickJS** runtime (~350KB native footprint).
+JavaScript code is executed inside a sandboxed, low-overhead **QuickJS** runtime (~350KB native footprint).
 
 ### Global APIs and Runtime Context:
-- **`HoyuShot.log(message)`** / **`console.log(...)`**: Outputs diagnostic messages to Android Logcat under the tag `HoyuShotPlugin[<plugin_id>]`.
+- **`console.log(...)`**: Outputs diagnostic messages directly to Android Logcat under the tag `HoyuShotPlugin[<plugin_id>]`.
 - **`pluginSettings`**: A global JSON object containing the live values configured by the user in the plugin's Settings Dialog.
 
 ---
 
 ### Hook 1: `onBeforeCapture(params, settings)`
-Fired immediately when the shutter button is triggered, right before the hardware capture request is committed to the camera sensor.
+Triggered immediately when the shutter button is tapped, right before the hardware `CaptureRequest` is committed to the Camera2 HAL sensor.
 
 #### Input Parameters:
 1. **`params`** *(Object)*:
-   - `params.iso` *(number)*: Current sensor sensitivity.
+   - `params.iso` *(number)*: Current sensor sensitivity ISO.
    - `params.shutterNanos` *(number)*: Exposure duration in nanoseconds ($1\text{s} = 1,000,000,000\text{ns}$).
    - `params.ev` *(number)*: Exposure compensation index (typically $-4$ to $+4$).
 2. **`settings`** *(Object)*: Live values from `plugin.json` settings.
 
 #### Return Value *(Object)*:
-Return an object overriding any of the target capture request values:
+Return an object overriding any of the target hardware capture values:
 ```javascript
 function onBeforeCapture(params, settings) {
-    console.log("Current ISO: " + params.iso + ", Boost Enabled: " + settings.enableNightBoost);
+    console.log("Current ISO: " + params.iso + ", EV Bias: " + settings.targetEvBias);
 
-    var targetIso = params.iso;
-    var targetShutter = params.shutterNanos;
-    var targetEv = params.ev;
-
-    // Example: Override ISO in low-light if enabled
-    if (settings.enableNightBoost && params.iso < 800) {
-        targetIso = Math.min(settings.maxIsoTarget, 1600);
-    }
+    var evOffset = settings.targetEvBias !== undefined ? settings.targetEvBias : 0;
+    var targetEv = params.ev + evOffset;
 
     return {
-        iso: targetIso,                // (Optional) Override sensor ISO
-        shutterNanos: targetShutter,   // (Optional) Override exposure time in nanoseconds
-        ev: targetEv,                  // (Optional) Override EV compensation
+        iso: params.iso,               // (Optional) Override sensor ISO
+        shutterNanos: params.shutterNanos, // (Optional) Override exposure time in nanoseconds
+        ev: targetEv,                  // (Optional) Override EV compensation index
         customTag: "MyPlugin_v1"       // (Optional) Metadata tag for logging
     };
 }
@@ -126,55 +123,80 @@ function onBeforeCapture(params, settings) {
 ---
 
 ### Hook 2: `onProcessPhoto(metrics, settings)`
-Executed during background post-processing to adjust colorimetry, white balance, or saturation.
+Executed during background JPEG post-processing on the decoded Bitmap. Allows granular per-channel balance and saturation modulation.
 
 #### Input Parameters:
 1. **`metrics`** *(Object)*:
-   - `metrics.avgR`: Mean Red channel intensity across the scene ($0 - 255$).
-   - `metrics.avgG`: Mean Green channel intensity across the scene ($0 - 255$).
-   - `metrics.avgB`: Mean Blue channel intensity across the scene ($0 - 255$).
+   - `metrics.avgR`: Mean Red channel intensity across the sampled scene ($0 - 255$).
+   - `metrics.avgG`: Mean Green channel intensity across the sampled scene ($0 - 255$).
+   - `metrics.avgB`: Mean Blue channel intensity across the sampled scene ($0 - 255$).
    - `metrics.avgSatPercent`: Average saturation percentage ($0\% - 100\%$).
-   - `metrics.maxClipPercent`: Percentage of pixels clipped at 255 in any channel.
+   - `metrics.maxClipPercent`: Maximum channel highlight clipping percentage ($0\% - 100\%$).
 2. **`settings`** *(Object)*: Live values from `plugin.json` settings.
 
 #### Return Value *(Object)*:
 ```javascript
 function onProcessPhoto(metrics, settings) {
-    var gainR = 1.0;
-    var gainG = 1.0;
-    var gainB = 1.0;
+    var rGain = 1.0;
+    var gGain = 1.0;
+    var bGain = 1.0;
     var satMultiplier = 1.0;
 
-    // Example: Correct Warm/Yellow cast
-    if (metrics.avgR - metrics.avgB > 22.0) {
-        gainR = 0.94;
-        gainB = 1.06;
+    // Rule 1: Neutral Tint Balancer
+    if (settings.enableTintCorrection) {
+        var diffRB = metrics.avgR - metrics.avgB;
+        if (diffRB > 22.0) {
+            // Warm cast detected -> temper Red, boost Blue
+            rGain *= 0.94;
+            bGain *= 1.07;
+        }
+    }
+
+    // Rule 2: Highlight Gamut Compression
+    if (metrics.maxClipPercent > 4.0) {
+        satMultiplier *= 0.92;
+        rGain = Math.min(rGain, 0.98);
+        gGain = Math.min(gGain, 0.98);
+        bGain = Math.min(bGain, 0.98);
     }
 
     return {
-        gainR: gainR,                // Red channel gain factor
-        gainG: gainG,                // Green channel gain factor
-        gainB: gainB,                // Blue channel gain factor
-        satMultiplier: satMultiplier // Overall saturation scalar
+        gainR: rGain,                // Red channel gain scalar (applied in-place to Bitmap)
+        gainG: gGain,                // Green channel gain scalar (applied in-place to Bitmap)
+        gainB: bGain,                // Blue channel gain scalar (applied in-place to Bitmap)
+        satMultiplier: satMultiplier // Global saturation scalar
     };
 }
 ```
 
 ---
 
-## 4. Publishing & Installing Plugins
+## 4. Automatic Conflict Resolution & Overrides
+When a plugin declares `"overrides": ["COLOR_ENGINE"]` (or implements `onProcessPhoto`), HoyuShot automatically:
+1. Disables conflicting native controls (e.g. `COLOR // ENGINE` in Settings Sheet).
+2. Tags the control with an alert: `OVERRIDDEN BY <PLUGIN NAME>`.
+3. Ensures no redundant double-processing or color clashing occurs between native filters and plugin scripts.
+4. Restores normal native functionality automatically when the plugin is turned **OFF** or uninstalled.
+
+---
+
+## 5. Publishing, Updating & Installing Plugins
 
 ### Step 1: Create a Public Git Repository
-1. Initialize a Git repository on GitHub or GitLab.
-2. Place `plugin.json` and `index.js` at the root of the repository.
-3. Push your commits to the default branch (`main` or `master`).
+1. Create a repository on GitHub (e.g., `https://github.com/hoyuuna/VNBUSARCHIVE-Compatible-HoyuShot-Plugin`).
+2. Add `plugin.json`, `index.js`, and `README.md` at the root.
+3. Push to `main`.
 
-### Step 2: Install in HoyuShot
+### Step 2: Install via HoyuShot App
 1. Open **HoyuShot**.
-2. Tap the **Settings** gear icon > Open **Advanced Settings**.
-3. Scroll to **`04 // PLUGINS & EXTENSIONS`**.
+2. Tap **Settings (Gear)** > **Advanced Settings**.
+3. Scroll down to **`04 // PLUGINS & EXTENSIONS`**.
 4. Tap **`+ INSTALL PLUGIN`**.
-5. Paste your repository URL (e.g., `https://github.com/user/my-hoyushot-plugin.git`).
+5. Enter the `.git` repository URL.
 6. Tap **`CLONE & INSTALL`**.
 
-The application automatically downloads the repository archive, verifies `plugin.json`, and activates your plugin immediately. You can tap **`SETTINGS`** on the plugin card to configure your custom controls anytime.
+### Step 3: Auto-Update Mechanism
+Whenever you push a new commit to your plugin repository with an incremented `"version"` in `plugin.json`:
+- HoyuShot automatically checks GitHub every time Advanced Settings opens.
+- A red **`[UPDATE AVAILABLE (vX.X.X)]`** button appears right on the plugin card.
+- Tapping it fetches, installs, and reloads the plugin seamlessly with zero data loss!
