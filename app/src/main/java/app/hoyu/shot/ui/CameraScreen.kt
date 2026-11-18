@@ -773,6 +773,7 @@ fun CameraScreen(
             onToggleHqViewport = { viewModel.toggleHqViewport() },
             onToggleZeroShutterLag = { viewModel.toggleZeroShutterLag() },
             onToggleDynamicZsl = { viewModel.toggleDynamicZsl() },
+            pluginManager = viewModel.pluginManager,
             onDismiss = {
                 isAdvancedSettingsVisible = false
                 scrollToUpdates = false

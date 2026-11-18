@@ -58,6 +58,7 @@ fun AdvancedSettingsDialog(
     onToggleHqViewport: () -> Unit = {},
     onToggleZeroShutterLag: () -> Unit = {},
     onToggleDynamicZsl: () -> Unit = {},
+    pluginManager: app.hoyu.shot.plugin.PluginManager? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -75,6 +76,22 @@ fun AdvancedSettingsDialog(
     var downloadProgressText by remember { mutableStateOf("") }
     var downloadedApkFile by remember { mutableStateOf<File?>(null) }
     var isHardwareLevelDialogVisible by remember { mutableStateOf(false) }
+
+    // Plugin Management state
+    val installedPlugins by (pluginManager?.installedPlugins ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }).collectAsState()
+    var isAddPluginDialogVisible by remember { mutableStateOf(false) }
+    var pluginGitUrlInput by remember { mutableStateOf("") }
+    var pluginInstallStatus by remember { mutableStateOf<String?>(null) }
+    var isInstallingPlugin by remember { mutableStateOf(false) }
+    var updatingPluginId by remember { mutableStateOf<String?>(null) }
+    var selectedPluginForConfig by remember { mutableStateOf<app.hoyu.shot.plugin.PluginInstance?>(null) }
+
+    // Auto-check updates for installed plugins when dialog opens
+    LaunchedEffect(visible) {
+        if (visible && pluginManager != null) {
+            pluginManager.checkForPluginUpdates()
+        }
+    }
 
     LaunchedEffect(visible, scrollToUpdates) {
         if (visible && scrollToUpdates) {
@@ -536,9 +553,197 @@ fun AdvancedSettingsDialog(
                 HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
 
                 // ==========================================
-                // SECTION 4: SYSTEM UPDATES
+                // SECTION 4: PLUGINS & EXTENSIONS
                 // ==========================================
-                SectionHeader("04 // SYSTEM UPDATES")
+                if (pluginManager != null) {
+                    SectionHeader("04 // PLUGINS & EXTENSIONS")
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "Install custom plugins from any public Git repository. Plugins can override camera capture parameters and provide custom settings.",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            view.triggerUiHaptic(uiHapticsEnabled)
+                            isAddPluginDialogVisible = true
+                            pluginInstallStatus = null
+                            pluginGitUrlInput = ""
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF18181B)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27272A)),
+                        shape = shape,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "+ INSTALL PLUGIN",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE11D48),
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (installedPlugins.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color(0xFF27272A), shape)
+                                .background(Color(0xFF0F0F12))
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "NO PLUGINS INSTALLED",
+                                color = Color(0xFF52525B),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            installedPlugins.forEach { plugin ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = shape,
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (plugin.isEnabled) Color(0xFFE11D48) else Color(0xFF27272A))
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = plugin.manifest.name.uppercase(),
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                Text(
+                                                    text = "v${plugin.manifest.version} • by ${plugin.manifest.author}",
+                                                    color = Color(0xFF71717A),
+                                                    fontSize = 8.sp,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(shape)
+                                                    .background(if (plugin.isEnabled) Color(0xFFE11D48) else Color(0xFF27272A))
+                                                    .clickable {
+                                                        view.triggerUiHaptic(uiHapticsEnabled)
+                                                        pluginManager.togglePlugin(plugin.manifest.id, !plugin.isEnabled)
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (plugin.isEnabled) "ACTIVE" else "DISABLED",
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                        }
+
+                                        if (plugin.manifest.description.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = plugin.manifest.description,
+                                                color = Color(0xFFA1A1AA),
+                                                fontSize = 9.sp,
+                                                lineHeight = 12.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    view.triggerUiHaptic(uiHapticsEnabled)
+                                                    selectedPluginForConfig = plugin
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
+                                                shape = shape,
+                                                modifier = Modifier.weight(1f),
+                                                contentPadding = PaddingValues(vertical = 4.dp)
+                                            ) {
+                                                Text("SETTINGS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.White)
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    view.triggerUiHaptic(uiHapticsEnabled)
+                                                    pluginManager.deletePlugin(plugin.manifest.id)
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3F1B22)),
+                                                shape = shape,
+                                                modifier = Modifier.weight(1f),
+                                                contentPadding = PaddingValues(vertical = 4.dp)
+                                            ) {
+                                                Text("DELETE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFFFF5252))
+                                            }
+                                        }
+
+                                        // Update Action button if a newer version is detected on Git repository
+                                        if (plugin.updateAvailableVersion != null) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            val isUpdatingThis = updatingPluginId == plugin.manifest.id
+                                            Button(
+                                                onClick = {
+                                                    view.triggerUiHaptic(uiHapticsEnabled)
+                                                    updatingPluginId = plugin.manifest.id
+                                                    scope.launch {
+                                                        pluginManager.updatePlugin(plugin.manifest.id) {}
+                                                        updatingPluginId = null
+                                                    }
+                                                },
+                                                enabled = !isUpdatingThis,
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                                                shape = shape,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                contentPadding = PaddingValues(vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (isUpdatingThis) "UPDATING..." else "UPDATE AVAILABLE (v${plugin.updateAvailableVersion})",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
+                }
+
+                // ==========================================
+                // SECTION 5: SYSTEM UPDATES
+                // ==========================================
+                SectionHeader("05 // SYSTEM UPDATES")
 
                 // Update Action Card
                 Column(
@@ -801,6 +1006,214 @@ fun AdvancedSettingsDialog(
             currentCameraId = uiState.currentCameraId,
             onDismiss = { isHardwareLevelDialogVisible = false }
         )
+    }
+
+    // Dialog: Plugin Settings Custom Config Sheet (Overlaid with same dimensions as Advanced Settings)
+    if (selectedPluginForConfig != null && pluginManager != null) {
+        PluginSettingsDialog(
+            visible = selectedPluginForConfig != null,
+            plugin = selectedPluginForConfig,
+            pluginManager = pluginManager,
+            uiState = uiState,
+            previewBoundsInRoot = previewBoundsInRoot,
+            onDismiss = { selectedPluginForConfig = null }
+        )
+    }
+
+    // Dialog: Install Plugin from Git (Styled identical to CustomModeDialogs)
+    if (isAddPluginDialogVisible && pluginManager != null) {
+        val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+        androidx.compose.ui.window.Dialog(onDismissRequest = {
+            if (!isInstallingPlugin) {
+                keyboardController?.hide()
+                isAddPluginDialogVisible = false
+            }
+        }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(Color(0xFF09090B))
+                        .border(1.dp, Color(0xFF27272A), shape)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PLUGIN // INSTALL FROM GIT",
+                                color = Color(0xFFFAFAFA),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "[ESC]",
+                                color = Color(0xFFA1A1AA),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier
+                                    .clickable {
+                                        if (!isInstallingPlugin) {
+                                            keyboardController?.hide()
+                                            view.triggerUiHaptic(uiHapticsEnabled)
+                                            isAddPluginDialogVisible = false
+                                        }
+                                    }
+                                    .padding(4.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Enter a public Git repository URL containing plugin.json & index.js",
+                            color = Color(0xFF71717A),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 13.sp
+                        )
+
+                        // Input Box (Styled identically to Custom Preset Name Input)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(shape)
+                                .background(Color(0xFF141418))
+                                .border(1.dp, Color(0xFF3F3F46), shape)
+                                .padding(horizontal = 10.dp, vertical = 10.dp)
+                        ) {
+                            if (pluginGitUrlInput.isEmpty()) {
+                                Text(
+                                    text = "https://github.com/user/plugin.git",
+                                    color = Color(0xFF52525B),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = pluginGitUrlInput,
+                                onValueChange = { raw ->
+                                    pluginGitUrlInput = raw.replace("\n", "").replace("\r", "")
+                                },
+                                singleLine = true,
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE11D48)),
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    color = Color(0xFFFAFAFA),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                                ),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                    onDone = {
+                                        keyboardController?.hide()
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        if (!pluginInstallStatus.isNullOrBlank()) {
+                            Text(
+                                text = pluginInstallStatus ?: "",
+                                color = if (pluginInstallStatus!!.startsWith("Error")) Color(0xFFFF5252) else Color(0xFF4CAF50),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // CANCEL Action Button
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(shape)
+                                    .background(Color(0xFF18181B))
+                                    .border(1.dp, Color(0xFF27272A), shape)
+                                    .clickable(enabled = !isInstallingPlugin) {
+                                        keyboardController?.hide()
+                                        view.triggerUiHaptic(uiHapticsEnabled)
+                                        isAddPluginDialogVisible = false
+                                    }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "CANCEL",
+                                    color = Color(0xFFA1A1AA),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            // INSTALL Action Button (Red signature button)
+                            val isReady = !isInstallingPlugin && pluginGitUrlInput.isNotBlank()
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(shape)
+                                    .background(if (isReady) Color(0xFFE11D48) else Color(0x33E11D48))
+                                    .border(1.dp, if (isReady) Color(0xFFE11D48) else Color(0xFF27272A), shape)
+                                    .clickable(enabled = isReady) {
+                                        keyboardController?.hide()
+                                        view.triggerUiHaptic(uiHapticsEnabled)
+                                        isInstallingPlugin = true
+                                        pluginInstallStatus = "Connecting..."
+                                        scope.launch {
+                                            val res = pluginManager.installPluginFromGit(pluginGitUrlInput.trim()) { status ->
+                                                pluginInstallStatus = status
+                                            }
+                                            isInstallingPlugin = false
+                                            res.fold(
+                                                onSuccess = { manifest ->
+                                                    pluginInstallStatus = "Installed: ${manifest.name}!"
+                                                    delay(600)
+                                                    isAddPluginDialogVisible = false
+                                                },
+                                                onFailure = { err ->
+                                                    pluginInstallStatus = "Error: ${err.message}"
+                                                }
+                                            )
+                                        }
+                                    }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (isInstallingPlugin) "INSTALLING..." else "INSTALL",
+                                    color = if (isReady) Color.White else Color(0xFF71717A),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

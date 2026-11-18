@@ -45,6 +45,8 @@ class Camera2Controller(
 ) {
     private val TAG = "Camera2Controller"
 
+    val pluginManager = app.hoyu.shot.plugin.PluginManager(context)
+
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val hardwareInspector = CameraHardwareInspector(context)
 
@@ -1922,6 +1924,31 @@ class Camera2Controller(
             // Match ISP pipeline modes seamlessly with preview to eliminate hardware pipeline re-configuration stalls (0.2s - 0.3s shutter lag)
             // Post-processing (NaturalColorProcessor) handles fine color tuning asynchronously on background threads without sensor latency.
             applyNoiseAndEdgeModes(captureBuilder, chars, currentNoiseReduction, currentSharpness, isPreview = true)
+
+            // Dynamic Plugin hook before capture (ISO / Shutter / Exposure overrides)
+            try {
+                val curIsoVal = captureBuilder.get(CaptureRequest.SENSOR_SENSITIVITY) ?: currentIso
+                val curShutterVal = captureBuilder.get(CaptureRequest.SENSOR_EXPOSURE_TIME) ?: currentShutterNanos
+                val curEvVal = captureBuilder.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION) ?: currentEvIndex
+                val pluginResult = pluginManager.applyBeforeCaptureHooks(
+                    currentIso = curIsoVal,
+                    currentShutterSpeedNanos = curShutterVal,
+                    currentEv = curEvVal
+                )
+                if (pluginResult.iso != null && pluginResult.iso != curIsoVal) {
+                    captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    captureBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, pluginResult.iso)
+                }
+                if (pluginResult.shutterSpeedNanos != null && pluginResult.shutterSpeedNanos != curShutterVal) {
+                    captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    captureBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, pluginResult.shutterSpeedNanos)
+                }
+                if (pluginResult.exposureCompensation != null && pluginResult.exposureCompensation != curEvVal) {
+                    captureBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, pluginResult.exposureCompensation)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Plugin hook error before capture: ${e.message}")
+            }
 
             captureBuilder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
 
