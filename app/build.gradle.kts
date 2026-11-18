@@ -92,6 +92,9 @@ dependencies {
     // Image & Exif support
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
+    // Lightweight QuickJS JavaScript Engine for dynamic plugins
+    implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

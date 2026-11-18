@@ -1680,6 +1680,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return list
     }
 
+    val pluginManager get() = cameraController.pluginManager
+
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
