@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.hoyu.shot.model.Camera2LevelExplainer
 import app.hoyu.shot.model.CameraUiState
+import app.hoyu.shot.plugin.tr
 import app.hoyu.shot.updater.UpdateCheckResult
 import app.hoyu.shot.updater.UpdateManager
 import kotlinx.coroutines.delay
@@ -1223,7 +1224,7 @@ fun AdvancedSettingsDialog(
 @Composable
 private fun SectionHeader(title: String) {
     Text(
-        text = title,
+        text = tr(title),
         color = Color(0xFFE11D48),
         fontSize = 10.sp,
         fontWeight = FontWeight.Black,
@@ -1313,7 +1314,7 @@ private fun SettingsToggleRow(
                 .padding(end = 8.dp)
         ) {
             Text(
-                text = title,
+                text = tr(title),
                 color = titleColor,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -1321,7 +1322,7 @@ private fun SettingsToggleRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = subtitle,
+                text = tr(subtitle),
                 color = subtitleColor,
                 fontSize = 8.sp,
                 fontFamily = FontFamily.Monospace

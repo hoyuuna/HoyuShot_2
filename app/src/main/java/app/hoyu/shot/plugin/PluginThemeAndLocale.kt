@@ -58,11 +58,16 @@ class PluginLocalization(
     val translations: Map<String, String> = emptyMap()
 ) {
     fun get(key: String, defaultVal: String): String {
-        return translations[key] ?: defaultVal
+        return translations[key] ?: translations[defaultVal] ?: defaultVal
     }
 }
 
 val LocalPluginLocalization = compositionLocalOf { PluginLocalization() }
+
+@Composable
+fun tr(keyOrDefault: String): String {
+    return LocalPluginLocalization.current.get(keyOrDefault, keyOrDefault)
+}
 
 @Composable
 fun tr(key: String, defaultVal: String): String {
