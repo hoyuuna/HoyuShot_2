@@ -39,103 +39,160 @@ import kotlin.math.roundToInt
 @Composable
 fun FocusRingOverlay(
     tapPoint: TapFocusPoint?,
+    isAdvFocusBoxEnabled: Boolean = false,
+    isContinuousAfFocused: Boolean = false,
+    isContinuousAfSearching: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (tapPoint == null) return
+    // If tapPoint is present, user explicitly tapped somewhere
+    if (tapPoint != null) {
+        var visible by remember(tapPoint.timestamp) { mutableStateOf(true) }
+        val animatedScale = remember(tapPoint.timestamp) { Animatable(1.4f) }
 
-    var visible by remember(tapPoint.timestamp) { mutableStateOf(true) }
-    val animatedScale = remember(tapPoint.timestamp) { Animatable(1.4f) }
-
-    // Entrance and state animation
-    LaunchedEffect(tapPoint.timestamp) {
-        visible = true
-        // Quick, snappy zoom-in spring when tapping
-        animatedScale.snapTo(1.4f)
-        animatedScale.animateTo(
-            targetValue = 1.0f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMedium
-            )
-        )
-        // Auto-dismiss after 2 seconds
-        delay(2000)
-        visible = false
-    }
-
-    // Secondary pulse when lock succeeds
-    LaunchedEffect(tapPoint.state) {
-        if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+        // Entrance and state animation
+        LaunchedEffect(tapPoint.timestamp) {
+            visible = true
+            animatedScale.snapTo(1.4f)
             animatedScale.animateTo(
-                targetValue = 0.88f,
-                animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing)
+                targetValue = 1.0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
             )
-            animatedScale.animateTo(
-                targetValue = 0.95f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)
-            )
+            // When ADV F BOX is disabled, auto-dismiss after 2 seconds like original
+            if (!isAdvFocusBoxEnabled) {
+                delay(2000)
+                visible = false
+            }
         }
-    }
 
-    // Strictly Nothing OS minimal palette: White focusing, Nothing Red locked!
-    val ringColor by animateColorAsState(
-        targetValue = when (tapPoint.state) {
-            FocusState.FOCUSING -> Color(0xFFFAFAFA)
-            FocusState.LOCKED_SUCCESS -> Color(0xFFE11D48)
-            FocusState.LOCKED_FAILED -> Color(0xFF71717A)
-            FocusState.IDLE -> Color(0xFFFAFAFA)
-        },
-        animationSpec = tween(150),
-        label = "ringColor"
-    )
+        // Secondary pulse when lock succeeds
+        LaunchedEffect(tapPoint.state) {
+            if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+                animatedScale.animateTo(
+                    targetValue = 0.88f,
+                    animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing)
+                )
+                animatedScale.animateTo(
+                    targetValue = 0.95f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)
+                )
+            }
+        }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(100)),
-        exit = fadeOut(tween(350))
-    ) {
-        Box(modifier = modifier.fillMaxSize()) {
-            val ringSize = 72.dp
-            Canvas(
-                modifier = Modifier
-                    .size(ringSize)
-                    .offset {
-                        IntOffset(
-                            (tapPoint.offset.x - (ringSize.toPx() / 2)).roundToInt(),
-                            (tapPoint.offset.y - (ringSize.toPx() / 2)).roundToInt()
+        val ringColor by animateColorAsState(
+            targetValue = when {
+                isAdvFocusBoxEnabled && tapPoint.state == FocusState.LOCKED_SUCCESS -> Color(0xFF00E676) // Steady Pro Green
+                tapPoint.state == FocusState.FOCUSING -> Color(0xFFA1A1AA) // Subtle Focus Ring Gray
+                tapPoint.state == FocusState.LOCKED_SUCCESS -> Color(0xFFE11D48) // Original Red
+                tapPoint.state == FocusState.LOCKED_FAILED -> Color(0xFF71717A)
+                else -> Color(0xFFA1A1AA)
+            },
+            animationSpec = tween(120),
+            label = "ringColor"
+        )
+
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(100)),
+            exit = fadeOut(tween(350))
+        ) {
+            Box(modifier = modifier.fillMaxSize()) {
+                val ringSize = 72.dp
+                Canvas(
+                    modifier = Modifier
+                        .size(ringSize)
+                        .offset {
+                            IntOffset(
+                                (tapPoint.offset.x - (ringSize.toPx() / 2)).roundToInt(),
+                                (tapPoint.offset.y - (ringSize.toPx() / 2)).roundToInt()
+                            )
+                        }
+                ) {
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    val currentScale = animatedScale.value
+                    val radius = (size.width / 2f - 4f) * currentScale
+
+                    val halfSide = radius * 0.95f
+                    val cornerLen = halfSide * 0.42f
+                    val strokeW = 2.0f // Thin crisp professional border
+
+                    // Top-Left Corner
+                    drawLine(ringColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide + cornerLen, center.y - halfSide), strokeW)
+                    drawLine(ringColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide, center.y - halfSide + cornerLen), strokeW)
+
+                    // Top-Right Corner
+                    drawLine(ringColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide - cornerLen, center.y - halfSide), strokeW)
+                    drawLine(ringColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide, center.y - halfSide + cornerLen), strokeW)
+
+                    // Bottom-Left Corner
+                    drawLine(ringColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide + cornerLen, center.y + halfSide), strokeW)
+                    drawLine(ringColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide, center.y + halfSide - cornerLen), strokeW)
+
+                    // Bottom-Right Corner
+                    drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
+                    drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
+
+                    // Center crosshair dot on lock
+                    if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+                        drawCircle(
+                            color = if (isAdvFocusBoxEnabled) Color(0xFF00E676) else Color(0xFFE11D48),
+                            radius = 3.0f,
+                            center = center
                         )
                     }
-            ) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                val currentScale = animatedScale.value
-                val radius = (size.width / 2f - 4f) * currentScale
+                }
+            }
+        }
+    } else if (isAdvFocusBoxEnabled) {
+        // Continuous Autofocus Box in center when ADV F BOX is enabled
+        val isGreen = isContinuousAfFocused
+        val isSearching = isContinuousAfSearching
+        val boxColor by animateColorAsState(
+            targetValue = when {
+                isGreen -> Color(0xFF00E676) // Steady non-blinking DSLR green
+                isSearching -> Color(0xFFA1A1AA) // Searching gray
+                else -> Color(0x66A1A1AA) // Idle / soft tracking gray
+            },
+            animationSpec = tween(120),
+            label = "continuousAfBoxColor"
+        )
 
-                // Focus square with corner brackets
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            val ringSize = 72.dp
+            Canvas(modifier = Modifier.size(ringSize)) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val radius = (size.width / 2f - 4f)
+
                 val halfSide = radius * 0.95f
                 val cornerLen = halfSide * 0.42f
-                val strokeW = 2.5f
+                val strokeW = 2.0f // Thin professional line
 
                 // Top-Left Corner
-                drawLine(ringColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide + cornerLen, center.y - halfSide), strokeW)
-                drawLine(ringColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide, center.y - halfSide + cornerLen), strokeW)
+                drawLine(boxColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide + cornerLen, center.y - halfSide), strokeW)
+                drawLine(boxColor, Offset(center.x - halfSide, center.y - halfSide), Offset(center.x - halfSide, center.y - halfSide + cornerLen), strokeW)
 
                 // Top-Right Corner
-                drawLine(ringColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide - cornerLen, center.y - halfSide), strokeW)
-                drawLine(ringColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide, center.y - halfSide + cornerLen), strokeW)
+                drawLine(boxColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide - cornerLen, center.y - halfSide), strokeW)
+                drawLine(boxColor, Offset(center.x + halfSide, center.y - halfSide), Offset(center.x + halfSide, center.y - halfSide + cornerLen), strokeW)
 
                 // Bottom-Left Corner
-                drawLine(ringColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide + cornerLen, center.y + halfSide), strokeW)
-                drawLine(ringColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide, center.y + halfSide - cornerLen), strokeW)
+                drawLine(boxColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide + cornerLen, center.y + halfSide), strokeW)
+                drawLine(boxColor, Offset(center.x - halfSide, center.y + halfSide), Offset(center.x - halfSide, center.y + halfSide - cornerLen), strokeW)
 
                 // Bottom-Right Corner
-                drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
-                drawLine(ringColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
+                drawLine(boxColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide - cornerLen, center.y + halfSide), strokeW)
+                drawLine(boxColor, Offset(center.x + halfSide, center.y + halfSide), Offset(center.x + halfSide, center.y + halfSide - cornerLen), strokeW)
 
-                // Center crosshair dot on lock
-                if (tapPoint.state == FocusState.LOCKED_SUCCESS) {
+                // Center crosshair dot when locked
+                if (isGreen) {
                     drawCircle(
-                        color = Color(0xFFE11D48),
-                        radius = 3.5f,
+                        color = Color(0xFF00E676),
+                        radius = 3.0f,
                         center = center
                     )
                 }

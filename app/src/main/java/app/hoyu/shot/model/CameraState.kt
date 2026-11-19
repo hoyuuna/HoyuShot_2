@@ -136,6 +136,9 @@ data class CameraUiState(
     val isFocusPeakingEnabled: Boolean = false,
     val isZebraStripesEnabled: Boolean = false,
     val isGeotaggingEnabled: Boolean = false,
+    val isAdvFocusBoxEnabled: Boolean = false,
+    val isContinuousAfFocused: Boolean = false,
+    val isContinuousAfSearching: Boolean = false,
     val isSunCompassEnabled: Boolean = false,
     val sunCompassState: SunCompassState = SunCompassState(),
 

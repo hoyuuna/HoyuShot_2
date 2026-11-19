@@ -131,6 +131,10 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean("saved_sun_compass_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_sun_compass_enabled", value).apply()
 
+    var savedAdvFocusBoxEnabled: Boolean
+        get() = prefs.getBoolean("saved_adv_focus_box_enabled", false)
+        set(value) = prefs.edit().putBoolean("saved_adv_focus_box_enabled", value).apply()
+
     var isGeotaggingEnabled: Boolean
         get() = prefs.getBoolean("saved_geotagging_enabled", false)
         set(value) = prefs.edit().putBoolean("saved_geotagging_enabled", value).apply()

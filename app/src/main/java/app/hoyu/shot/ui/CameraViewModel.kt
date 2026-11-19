@@ -99,6 +99,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+        },
+        onAfStateChanged = { isFocused, isSearching ->
+            if (_uiState.value.isContinuousAfFocused != isFocused || _uiState.value.isContinuousAfSearching != isSearching) {
+                _uiState.update {
+                    it.copy(
+                        isContinuousAfFocused = isFocused,
+                        isContinuousAfSearching = isSearching
+                    )
+                }
+            }
         }
     )
 
@@ -322,6 +332,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isZebraStripesEnabled = initZebra,
                 isGeotaggingEnabled = initGeo,
                 isSunCompassEnabled = initSunCompass,
+                isAdvFocusBoxEnabled = settingsRepo.savedAdvFocusBoxEnabled,
                 jpegQuality = settingsRepo.jpegQuality,
                 isMirrorSelfie = settingsRepo.isMirrorSelfie,
                 cameraSoundMode = settingsRepo.cameraSoundMode,
@@ -620,6 +631,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleGeotagging() {
         val next = !_uiState.value.isGeotaggingEnabled
         setGeotaggingEnabled(next)
+    }
+
+    fun toggleAdvFocusBox() {
+        val next = !_uiState.value.isAdvFocusBoxEnabled
+        _uiState.update { it.copy(isAdvFocusBoxEnabled = next) }
+        settingsRepo.savedAdvFocusBoxEnabled = next
     }
 
     fun setSunCompassEnabled(enabled: Boolean) {

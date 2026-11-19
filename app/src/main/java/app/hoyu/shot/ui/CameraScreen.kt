@@ -764,6 +764,7 @@ fun CameraScreen(
                     requestLocationFor("SUN_COMPASS") { viewModel.setSunCompassEnabled(true) }
                 }
             },
+            onToggleAdvFocusBox = { viewModel.toggleAdvFocusBox() },
             onToggleHdr = { viewModel.toggleHdr() },
             pluginManager = viewModel.pluginManager,
             onOpenAdvancedSettings = {
@@ -1154,8 +1155,13 @@ private fun ViewfinderPreviewContent(
             )
         }
 
-        // Tap-to-Focus Reticle (Animated spring and pulse on lock)
-        FocusRingOverlay(tapPoint = uiState.tapFocusPoint)
+        // Tap-to-Focus & Advanced Continuous AF Reticle
+        FocusRingOverlay(
+            tapPoint = uiState.tapFocusPoint,
+            isAdvFocusBoxEnabled = uiState.isAdvFocusBoxEnabled,
+            isContinuousAfFocused = uiState.isContinuousAfFocused,
+            isContinuousAfSearching = uiState.isContinuousAfSearching
+        )
 
         // Spot AE Metering Reticle (Shows independently from AF)
         SpotAeRingOverlay(tapPoint = uiState.tapAePoint, rotationDegrees = animatedRotation)
