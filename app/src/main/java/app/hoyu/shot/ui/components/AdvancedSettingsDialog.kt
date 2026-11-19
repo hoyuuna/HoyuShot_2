@@ -1006,10 +1006,16 @@ fun AdvancedSettingsDialog(
     }
 
     // Dialog: Plugin Settings Custom Config Sheet (Overlaid with same dimensions as Advanced Settings)
-    if (pluginManager != null) {
+    var cachedPluginForDialog by remember { mutableStateOf<app.hoyu.shot.plugin.PluginInstance?>(null) }
+    if (selectedPluginForConfig != null) {
+        cachedPluginForDialog = selectedPluginForConfig
+    }
+    val pluginToShow = selectedPluginForConfig ?: cachedPluginForDialog
+
+    if (pluginManager != null && pluginToShow != null) {
         PluginSettingsDialog(
             visible = selectedPluginForConfig != null,
-            plugin = selectedPluginForConfig,
+            plugin = pluginToShow,
             pluginManager = pluginManager,
             uiState = uiState,
             previewBoundsInRoot = previewBoundsInRoot,

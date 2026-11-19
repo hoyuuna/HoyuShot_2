@@ -558,11 +558,19 @@ fun CameraScreen(
                             previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { nanos ->
-                                viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
+                                if (uiState.exposureMode != ExposureMode.MANUAL) {
+                                    viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
+                                }
                                 viewModel.setShutterSpeedNanos(nanos)
                             },
                             formatItem = { HardwareCapabilities.formatShutterSpeed(it) },
-                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                            onAutoSelected = {
+                                if (uiState.exposureMode == ExposureMode.MANUAL) {
+                                    viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
+                                } else {
+                                    viewModel.setExposureMode(ExposureMode.AUTO)
+                                }
+                            },
                             isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.ISO_PRIORITY,
                             onDismiss = { activeParamMenu = null }
                         )
@@ -585,11 +593,19 @@ fun CameraScreen(
                             previewBoundsInRoot = previewBoundsInRoot,
                             rotationDegrees = animatedRotation,
                             onItemSelected = { iso ->
-                                viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
+                                if (uiState.exposureMode != ExposureMode.MANUAL) {
+                                    viewModel.setExposureMode(ExposureMode.ISO_PRIORITY)
+                                }
                                 viewModel.setIso(iso)
                             },
                             formatItem = { "$it" },
-                            onAutoSelected = { viewModel.setExposureMode(ExposureMode.AUTO) },
+                            onAutoSelected = {
+                                if (uiState.exposureMode == ExposureMode.MANUAL) {
+                                    viewModel.setExposureMode(ExposureMode.SHUTTER_PRIORITY)
+                                } else {
+                                    viewModel.setExposureMode(ExposureMode.AUTO)
+                                }
+                            },
                             isAutoSelected = uiState.exposureMode == ExposureMode.AUTO || uiState.exposureMode == ExposureMode.SHUTTER_PRIORITY,
                             onDismiss = { activeParamMenu = null }
                         )

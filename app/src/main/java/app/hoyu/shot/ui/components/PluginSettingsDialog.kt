@@ -58,7 +58,7 @@ fun PluginSettingsDialog(
     }
 
     AnimatedVisibility(
-        visible = visible && plugin != null,
+        visible = visible,
         enter = fadeIn(tween(200)) + scaleIn(tween(200), initialScale = 0.92f) + slideInVertically(tween(200), initialOffsetY = { it / 10 }),
         exit = fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.92f) + slideOutVertically(tween(150), targetOffsetY = { it / 10 }),
         modifier = modifier.fillMaxSize()
