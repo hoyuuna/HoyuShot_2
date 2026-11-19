@@ -2,6 +2,7 @@ package app.hoyu.shot.plugin
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 
@@ -63,6 +64,48 @@ class PluginLocalization(
 }
 
 val LocalPluginLocalization = compositionLocalOf { PluginLocalization() }
+
+@Composable
+fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    fontStyle: androidx.compose.ui.text.font.FontStyle? = null,
+    fontWeight: androidx.compose.ui.text.font.FontWeight? = null,
+    fontFamily: androidx.compose.ui.text.font.FontFamily? = null,
+    letterSpacing: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    textDecoration: androidx.compose.ui.text.style.TextDecoration? = null,
+    textAlign: androidx.compose.ui.text.style.TextAlign? = null,
+    lineHeight: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: ((androidx.compose.ui.text.TextLayoutResult) -> Unit)? = null,
+    style: androidx.compose.ui.text.TextStyle = androidx.compose.material3.LocalTextStyle.current
+) {
+    val translatedText = tr(text)
+    androidx.compose.material3.Text(
+        text = translatedText,
+        modifier = modifier,
+        color = color,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
 
 @Composable
 fun tr(keyOrDefault: String): String {

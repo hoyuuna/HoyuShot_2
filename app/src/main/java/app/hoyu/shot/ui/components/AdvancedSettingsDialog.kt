@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
+import app.hoyu.shot.plugin.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1224,7 +1225,7 @@ fun AdvancedSettingsDialog(
 @Composable
 private fun SectionHeader(title: String) {
     Text(
-        text = tr(title),
+        text = title,
         color = Color(0xFFE11D48),
         fontSize = 10.sp,
         fontWeight = FontWeight.Black,
@@ -1314,7 +1315,7 @@ private fun SettingsToggleRow(
                 .padding(end = 8.dp)
         ) {
             Text(
-                text = tr(title),
+                text = title,
                 color = titleColor,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -1322,7 +1323,7 @@ private fun SettingsToggleRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = tr(subtitle),
+                text = subtitle,
                 color = subtitleColor,
                 fontSize = 8.sp,
                 fontFamily = FontFamily.Monospace
