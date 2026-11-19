@@ -559,7 +559,7 @@ fun AdvancedSettingsDialog(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         SectionHeader("04 // PLUGINS & EXTENSIONS")
                         Text(
-                            text = "Install custom plugins from any public Git repository.",
+                            text = "Install custom plugins from any public Git repository",
                             color = Color(0xFF71717A),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,

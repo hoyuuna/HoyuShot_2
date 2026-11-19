@@ -214,7 +214,14 @@ fun CameraScreen(
         AspectRatio.RATIO_3_2 -> 2f / 3f
     }
 
-    CompositionLocalProvider(LocalUiHapticsEnabled provides (uiState.uiHapticsMode == "VIBRATE")) {
+    val pluginTheme by viewModel.pluginManager.currentTheme.collectAsState()
+    val pluginLocalization by viewModel.pluginManager.currentLocalization.collectAsState()
+
+    CompositionLocalProvider(
+        LocalUiHapticsEnabled provides (uiState.uiHapticsMode == "VIBRATE"),
+        app.hoyu.shot.plugin.LocalPluginTheme provides pluginTheme,
+        app.hoyu.shot.plugin.LocalPluginLocalization provides pluginLocalization
+    ) {
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()

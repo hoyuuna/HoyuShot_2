@@ -24,11 +24,28 @@ class PluginManager(private val context: Context) {
     private val _installedPlugins = MutableStateFlow<List<PluginInstance>>(emptyList())
     val installedPlugins: StateFlow<List<PluginInstance>> = _installedPlugins.asStateFlow()
 
+    val currentTheme = MutableStateFlow<PluginThemeConfig>(PluginThemeConfig())
+    val currentLocalization = MutableStateFlow<PluginLocalization>(PluginLocalization())
+
     init {
         if (!pluginsDir.exists()) {
             pluginsDir.mkdirs()
         }
         loadInstalledPlugins()
+    }
+
+    private fun recomputeThemeAndLocale(plugins: List<PluginInstance>) {
+        val active = plugins.filter { it.isEnabled }
+        // Compute active theme
+        val activeTheme = active.mapNotNull { it.manifest.theme }.firstOrNull() ?: PluginThemeConfig()
+        currentTheme.value = activeTheme
+
+        // Compute merged active localization
+        val mergedTranslations = mutableMapOf<String, String>()
+        for (p in active) {
+            mergedTranslations.putAll(p.manifest.translations)
+        }
+        currentLocalization.value = PluginLocalization(mergedTranslations)
     }
 
     fun loadInstalledPlugins() {
@@ -61,13 +78,16 @@ class PluginManager(private val context: Context) {
             }
         }
         _installedPlugins.value = list
+        recomputeThemeAndLocale(list)
     }
 
     fun togglePlugin(pluginId: String, enabled: Boolean) {
         prefs.edit().putBoolean("plugin_enabled_$pluginId", enabled).apply()
-        _installedPlugins.value = _installedPlugins.value.map {
+        val updated = _installedPlugins.value.map {
             if (it.manifest.id == pluginId) it.copy(isEnabled = enabled) else it
         }
+        _installedPlugins.value = updated
+        recomputeThemeAndLocale(updated)
     }
 
     fun deletePlugin(pluginId: String): Boolean {

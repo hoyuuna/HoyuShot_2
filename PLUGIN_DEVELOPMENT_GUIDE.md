@@ -1,6 +1,6 @@
 # HoyuShot Plugin Development Guide (From Zero to Advanced)
 
-The HoyuShot Plugin System allows any developer to extend and override camera hardware behaviors, capture parameters, colorimetry mathematics, and build custom user interfaces using standard JavaScript.
+The HoyuShot Plugin System allows any developer to extend and override camera hardware behaviors, capture parameters, colorimetry mathematics, and build custom user interfaces, themes, and language packs using standard JavaScript and JSON schemas.
 
 All plugins are sandboxed, isolated, lightweight (~350KB native footprint via embedded QuickJS), and can be distributed and installed directly via any public Git repository (GitHub, GitLab, Codeberg, etc.).
 
@@ -12,23 +12,28 @@ All plugins are sandboxed, isolated, lightweight (~350KB native footprint via em
 3. Plugin Configuration: plugin.json
    - Basic Metadata
    - Overrides Declaration
-   - Setting Types (TOGGLE, SLIDER, DROPDOWN)
-4. JavaScript Runtime & Lifecycle Hooks: index.js
+   - Plugin Types (EXTENSION, THEME_PACK, LANGUAGE_PACK)
+   - Interactive Setting Types (TOGGLE, SLIDER, DROPDOWN)
+4. UI & Theme Customization (Theme Packs)
+5. Language & Translation Customization (Language Packs)
+6. JavaScript Runtime & Lifecycle Hooks: index.js
    - Global Context & Debugging
    - Hook 1: onBeforeCapture (Exposure, ISO, Shutter Speed, EV Bias)
    - Hook 2: onProcessPhoto (Colorimetry, White Balance, Gamut Compression)
-5. Practical Tutorials
+7. Practical Tutorials
    - Example 1 (Beginner): Low-Light Night Assist
    - Example 2 (Intermediate): High-Speed Action Sports Freeze
-   - Example 3 (Advanced): VNBUSARCHIVE Photographic Colorimetry Engine
-6. Troubleshooting, Debugging & Best Practices
-7. Publishing, Installing & Updating Plugins
+   - Example 3 (Theme Pack): Cyberpunk Amber Neon Skin
+   - Example 4 (Language Pack): Complete Community Vietnamese Translation
+   - Example 5 (Advanced): VNBUSARCHIVE Photographic Colorimetry Engine
+8. Troubleshooting, Debugging & Best Practices
+9. Publishing, Installing & Updating Plugins
 
 ---
 
 ## 1. Core Architecture & Mental Model
 
-When you write a plugin for HoyuShot, your JavaScript code runs at two critical phases of camera operation:
+When you write a plugin for HoyuShot, your plugin can intervene across multiple subsystems of the camera app:
 
 - Phase A: Pre-Capture (Hardware Sensor Level)
   Triggered when the user taps the shutter button, right before the Android Camera2 CaptureRequest is submitted to hardware. Here you can read the current exposure state and override ISO, shutter exposure duration, or EV compensation. If overridden, HoyuShot automatically switches AE mode to manual to enforce your exact requested parameters.
@@ -36,19 +41,25 @@ When you write a plugin for HoyuShot, your JavaScript code runs at two critical 
 - Phase B: Post-Processing (Pixel & Color Level)
   Triggered when raw sensor data is decoded into an uncompressed Bitmap on a background thread. HoyuShot performs a fast strided sampling grid (~128x128) across the photo and calculates actual optical metrics (R, G, B channel averages, overall saturation percentage, highlight clipping percentage). It passes these metrics to your plugin, allowing you to return precise channel gain scalars (gainR, gainG, gainB) and global saturation multipliers (satMultiplier). These are applied in-place to the image pixels before JPEG encoding.
 
-- Phase C: UI & Conflict Resolution
+- Phase C: UI & Theme Level (Theme Packs)
+  Plugins can define custom color palettes (accent, background, cards, borders, text) and rounded corner metrics. When active, HoyuShot's interface completely conforms to the plugin's aesthetic styling.
+
+- Phase D: Internationalization Level (Language Packs)
+  Plugins can provide a full translation dictionary mapping native English keys to any target language. The entire application UI updates its text immediately upon activation.
+
+- Phase E: Conflict Resolution
   If your plugin overrides an app subsystem (such as COLOR_ENGINE), HoyuShot automatically disables the native control in the app UI and labels it with "Overridden by <Your Plugin Name>". When the user toggles your plugin OFF or deletes it, native controls are instantly restored.
 
 ---
 
 ## 2. Repository Structure
 
-A valid plugin repository requires only two files at the root of the Git repository:
+A valid plugin repository requires only `plugin.json` (plus optional `index.js` if capture hooks are used):
 
 ```
 my-hoyushot-plugin/
-├── plugin.json       - (Required) Metadata, system overrides, and UI configuration schema
-├── index.js          - (Required) JavaScript logic containing the lifecycle hooks
+├── plugin.json       - (Required) Metadata, system overrides, theme/translations, and UI configuration schema
+├── index.js          - (Required for Extensions) JavaScript logic containing the lifecycle hooks
 └── README.md         - (Recommended) Usage instructions and changelog
 ```
 
@@ -58,7 +69,7 @@ You can develop and host this repository publicly on GitHub, GitLab, or any Git 
 
 ## 3. Plugin Configuration: plugin.json
 
-The `plugin.json` file defines the plugin identity, declares which native app subsystems it takes over, and specifies the interactive settings UI that HoyuShot automatically renders.
+The `plugin.json` file defines the plugin identity, declares which native app subsystems it takes over, and specifies theme palettes, translations, or interactive settings.
 
 ### Full Schema Reference
 
@@ -68,8 +79,22 @@ The `plugin.json` file defines the plugin identity, declares which native app su
   "name": "MY CUSTOM PLUGIN",
   "version": "1.0.0",
   "author": "Developer Name",
-  "description": "Comprehensive explanation of what this plugin accomplishes.",
+  "description": "Comprehensive explanation of what this plugin accomplishes",
+  "type": "EXTENSION",
   "overrides": ["COLOR_ENGINE"],
+  "theme": {
+    "accentColor": "#E11D48",
+    "backgroundColor": "#09090B",
+    "cardBackground": "#18181B",
+    "borderColor": "#27272A",
+    "textColor": "#FAFAFA",
+    "subtextColor": "#A1A1AA",
+    "cornerRadiusDp": 2
+  },
+  "translations": {
+    "sec_shutter": "SHUTTER SPEED",
+    "iso_sensor": "SENSOR ISO"
+  },
   "settings": [
     {
       "key": "enableFeatureX",
@@ -107,9 +132,12 @@ The `plugin.json` file defines the plugin identity, declares which native app su
 - `version` (string, required): Semantic version string (e.g. `1.0.0`, `1.0.1`). Bumping this string triggers HoyuShot's automated update checker.
 - `author` (string, required): Author or organization name.
 - `description` (string, required): Description shown on the plugin card in the app.
+- `type` (string, optional): `"EXTENSION"` (default capture logic), `"THEME_PACK"` (styling only), or `"LANGUAGE_PACK"` (translations only).
 - `overrides` (array of strings, optional): Declare system subsystems overridden by this plugin.
   - Supported options: `["COLOR_ENGINE"]`.
   - When declared, HoyuShot disables the native COLOR // ENGINE selector in the Settings Sheet and displays: `Overridden by <Plugin Name>`.
+- `theme` (object, optional): Custom color tokens and corner radius applied globally across the application.
+- `translations` (object, optional): Key-value dictionary of string replacements.
 - `settings` (array of objects, optional): Definitions of interactive controls rendered in the plugin's Settings Dialog.
 
 ### Supported Setting Types
@@ -128,7 +156,42 @@ The `plugin.json` file defines the plugin identity, declares which native app su
 
 ---
 
-## 4. JavaScript Runtime & Lifecycle Hooks: index.js
+## 4. UI & Theme Customization (Theme Packs)
+
+HoyuShot supports complete aesthetic skinning via the `"theme"` block in `plugin.json`. You do not need to write any JavaScript to create a Theme Pack.
+
+### Color Tokens
+- `accentColor`: Highlight color for selected chips, primary action buttons, toggle active states, and focus indicators.
+- `backgroundColor`: Root backdrop color behind viewfinders and dialog scrims.
+- `cardBackground`: Background for popup dialogs, parameter grid sheets, and cards.
+- `borderColor`: Thin border stroke color outlining buttons and containers.
+- `textColor`: Primary high-contrast text color for titles and values.
+- `subtextColor`: Muted secondary text color for subtitles and labels.
+- `cornerRadiusDp`: Radius for corners (`0` for brutalist sharp, `2` for shadcn razor, `8` for rounded modern).
+
+---
+
+## 5. Language & Translation Customization (Language Packs)
+
+Language packs allow complete localization of the interface by supplying a key-value dictionary under `"translations"`.
+
+### Standard Translation Keys
+- `sec_shutter`: Shutter speed parameter title.
+- `iso_sensor`: ISO sensitivity parameter title.
+- `wb_white_balance`: White balance parameter title.
+- `focus_lens`: Manual focus diopters title.
+- `ev_comp`: Exposure compensation title.
+- `color_engine`: Color engine section title.
+- `advanced_config`: Advanced system settings title.
+- `plugins_extensions`: Plugins section title.
+- `btn_install_plugin`: Install plugin button text.
+- `btn_save_preset`: Save preset button label.
+- `mode_auto`: Auto mode label.
+- `mode_manual`: Manual mode label.
+
+---
+
+## 6. JavaScript Runtime & Lifecycle Hooks: index.js
 
 Code inside `index.js` runs in standard ES5/ES6 JavaScript inside QuickJS.
 
@@ -145,19 +208,10 @@ Called right before the hardware camera shutter fires. Use this to inspect curre
 
 ```javascript
 function onBeforeCapture(params, settings) {
-    // params contains:
-    // params.iso          - Current sensor sensitivity (e.g. 100, 400, 1600)
-    // params.shutterNanos - Exposure duration in nanoseconds (1s = 1,000,000,000ns)
-    // params.ev           - Exposure compensation step index (-4 to +4)
-    
-    // settings contains live user options:
-    // settings.targetEvBias, settings.enableNightBoost, etc.
-
     var newIso = params.iso;
     var newShutter = params.shutterNanos;
     var newEv = params.ev;
 
-    // Optional calculations...
     if (settings.targetEvBias !== undefined) {
         newEv = params.ev + settings.targetEvBias;
     }
@@ -171,8 +225,6 @@ function onBeforeCapture(params, settings) {
 }
 ```
 
-If you do not wish to override a parameter, simply return the original value from `params` or omit the key.
-
 ---
 
 ### Hook 2: onProcessPhoto(metrics, settings)
@@ -181,21 +233,13 @@ Called after image capture when the photo bitmap is ready for post-processing. U
 
 ```javascript
 function onProcessPhoto(metrics, settings) {
-    // metrics contains real-time optical analysis of the captured photo:
-    // metrics.avgR           - Mean red channel value across sampled grid (0.0 to 255.0)
-    // metrics.avgG           - Mean green channel value across sampled grid (0.0 to 255.0)
-    // metrics.avgB           - Mean blue channel value across sampled grid (0.0 to 255.0)
-    // metrics.avgSatPercent  - Average scene saturation percentage (0.0% to 100.0%)
-    // metrics.maxClipPercent - Percentage of pixels that hit clipping limit (254-255)
-
     var rGain = 1.0;
     var gGain = 1.0;
     var bGain = 1.0;
     var satMultiplier = 1.0;
 
-    // Example logic...
     if (metrics.avgSatPercent > 50.0) {
-        satMultiplier = 50.0 / metrics.avgSatPercent; // Compress oversaturation
+        satMultiplier = 50.0 / metrics.avgSatPercent;
     }
 
     return {
@@ -209,11 +253,9 @@ function onProcessPhoto(metrics, settings) {
 
 ---
 
-## 5. Practical Tutorials
+## 7. Practical Tutorials
 
 ### Tutorial 1 (Beginner): Low-Light Night Vision Assist
-
-Goal: Automatically bump ISO and lower exposure compensation if the scene is too dark.
 
 `plugin.json`:
 ```json
@@ -222,7 +264,7 @@ Goal: Automatically bump ISO and lower exposure compensation if the scene is too
   "name": "NIGHT ASSIST",
   "version": "1.0.0",
   "author": "Community",
-  "description": "Guarantees minimum ISO gain in low light environments.",
+  "description": "Guarantees minimum ISO gain in low light environments",
   "settings": [
     {
       "key": "minIsoLimit",
@@ -261,8 +303,6 @@ function onBeforeCapture(params, settings) {
 
 ### Tutorial 2 (Intermediate): Action Sports Motion Freeze
 
-Goal: Prevent motion blur by enforcing a shutter speed of at least 1/1000s (1,000,000 nanoseconds) for moving objects.
-
 `plugin.json`:
 ```json
 {
@@ -270,7 +310,7 @@ Goal: Prevent motion blur by enforcing a shutter speed of at least 1/1000s (1,00
   "name": "ACTION SPORTS FREEZE",
   "version": "1.0.0",
   "author": "Sports Photographer",
-  "description": "Caps shutter exposure duration to freeze fast-moving vehicles and athletes.",
+  "description": "Caps shutter exposure duration to freeze fast-moving vehicles and athletes",
   "settings": [
     {
       "key": "maxExposureNanos",
@@ -289,12 +329,11 @@ Goal: Prevent motion blur by enforcing a shutter speed of at least 1/1000s (1,00
 `index.js`:
 ```javascript
 function onBeforeCapture(params, settings) {
-    // 1 microsecond = 1000 nanoseconds
     var maxNanos = (settings.maxExposureNanos || 1000) * 1000;
     var chosenShutter = params.shutterNanos;
 
     if (params.shutterNanos > maxNanos) {
-        console.log("[ActionSports] Shutter was too slow (" + params.shutterNanos + "ns). Forcing " + maxNanos + "ns");
+        console.log("[ActionSports] Shutter capped to " + maxNanos + "ns");
         chosenShutter = maxNanos;
     }
 
@@ -308,9 +347,58 @@ function onBeforeCapture(params, settings) {
 
 ---
 
-### Tutorial 3 (Advanced): Full VNBUSARCHIVE Colorimetry Engine
+### Tutorial 3 (Theme Pack): Cyberpunk Amber Neon Skin
 
-Goal: Industrial standard color balancing, neutral gray surface tint removal, saturation safety bounding (10% - 52%), and highlight soft-knee compression.
+`plugin.json`:
+```json
+{
+  "id": "com.theme.cyberpunk.amber",
+  "name": "CYBERPUNK AMBER HUD",
+  "version": "1.0.0",
+  "author": "NeonDesigner",
+  "description": "High-contrast tactical amber interface with sharp military aesthetic",
+  "type": "THEME_PACK",
+  "theme": {
+    "accentColor": "#FFB703",
+    "backgroundColor": "#050507",
+    "cardBackground": "#121216",
+    "borderColor": "#382D12",
+    "textColor": "#FFF2CC",
+    "subtextColor": "#A39470",
+    "cornerRadiusDp": 0
+  }
+}
+```
+
+---
+
+### Tutorial 4 (Language Pack): Complete Vietnamese Translation
+
+`plugin.json`:
+```json
+{
+  "id": "com.lang.vietnamese",
+  "name": "GÓI TIẾNG VIỆT HOYUSHOT",
+  "version": "1.0.0",
+  "author": "Hoyuuna",
+  "description": "Bản dịch giao diện tiếng Việt chuẩn cho toàn bộ ứng dụng",
+  "type": "LANGUAGE_PACK",
+  "translations": {
+    "sec_shutter": "TỐC ĐỘ MÀN TRẬP",
+    "iso_sensor": "ĐỘ NHẠY SÁNG ISO",
+    "wb_white_balance": "CÂN BẰNG TRẮNG",
+    "color_engine": "BỘ XỬ LÝ MÀU",
+    "advanced_config": "CÀI ĐẶT HỆ THỐNG",
+    "plugins_extensions": "04 // PLUGIN & TIỆN ÍCH",
+    "btn_install_plugin": "+ CÀI ĐẶT PLUGIN",
+    "btn_save_preset": "LƯU PRESET MỚI"
+  }
+}
+```
+
+---
+
+### Tutorial 5 (Advanced): VNBUSARCHIVE Colorimetry Engine
 
 `plugin.json`:
 ```json
@@ -319,34 +407,34 @@ Goal: Industrial standard color balancing, neutral gray surface tint removal, sa
   "name": "VNBUSARCHIVE-Compatible HoyuShot Plugin",
   "version": "1.0.2",
   "author": "Hoyuuna",
-  "description": "Industrial vehicle documentation color standard: neutral surface tint neutralization, saturation bounding (10% - 52%), and specular highlight compression.",
+  "description": "Chuẩn hóa trắc sắc học VNBUSARCHIVE: tự động khử 4 loại ám màu trên vùng trung tính (ấm/vàng, lạnh/xanh, magenta/hồng, xanh lá), khóa dải bão hòa màu an toàn (10% - 52%) và chống bệt màu highlight",
   "overrides": ["COLOR_ENGINE"],
   "settings": [
     {
       "key": "enableTintCorrection",
-      "title": "Neutral Tint Balancer",
-      "description": "Neutralize warm, cool, magenta, and green color casts",
+      "title": "Khử ám màu trung tính",
+      "description": "Tự động phân tích vùng xám trung tính và triệt tiêu các loại ám màu",
       "type": "TOGGLE",
       "defaultValue": true
     },
     {
       "key": "saturationGuard",
-      "title": "Saturation Bounds (10% - 52%)",
-      "description": "Compress oversaturation and recover washed out colors",
+      "title": "Khóa độ bão hòa (10% - 52%)",
+      "description": "Nén màu bị rực gắt và phục hồi độ tươi cho ảnh nhợt nhạt",
       "type": "TOGGLE",
       "defaultValue": true
     },
     {
       "key": "antiClipping",
-      "title": "Highlight Gamut Compression",
-      "description": "Soft-knee compression when channel clipping exceeds 4%",
+      "title": "Chống bệt màu Highlight",
+      "description": "Nén dải màu mềm khi kênh màu vượt quá 4% chạm trần 255",
       "type": "TOGGLE",
       "defaultValue": true
     },
     {
       "key": "targetEvBias",
-      "title": "Highlight EV Bias",
-      "description": "Exposure offset applied before capture",
+      "title": "Bù trừ sáng Highlight (EV)",
+      "description": "Chủ động can thiệp bù trừ phơi sáng trước khi chụp",
       "type": "SLIDER",
       "defaultValue": 0,
       "min": -4,
@@ -384,26 +472,22 @@ function onProcessPhoto(metrics, settings) {
 
         // Warm / Yellow cast
         if (diffRB > 22.0 && diffGB > 10.0) {
-            console.log("[VNBUS] Warm cast: Decreasing Red, boosting Blue");
             rGain *= 0.94;
             bGain *= 1.07;
         }
         // Cool / Blue cast
         else if (diffBR > 20.0) {
-            console.log("[VNBUS] Cool cast: Increasing Red, decreasing Blue");
             bGain *= 0.93;
             rGain *= 1.06;
         }
         // Magenta / Pink cast
         else if (diffRG > 18.0 && diffBR > 12.0) {
-            console.log("[VNBUS] Magenta cast: Boosting Green");
             gGain *= 1.06;
             rGain *= 0.96;
             bGain *= 0.96;
         }
         // Green cast
         else if (diffGR > 18.0 && diffGB > 12.0) {
-            console.log("[VNBUS] Green cast: Compensating Red and Blue");
             gGain *= 0.94;
             rGain *= 1.04;
             bGain *= 1.04;
@@ -413,17 +497,14 @@ function onProcessPhoto(metrics, settings) {
     // Rule 2: Saturation Bounds (10% <= avgSat <= 52%)
     if (settings.saturationGuard) {
         if (metrics.avgSatPercent > 52.0) {
-            console.log("[VNBUS] Oversaturated (" + metrics.avgSatPercent + "%): Compressing");
             satMultiplier = Math.max(0.75, 52.0 / metrics.avgSatPercent);
         } else if (metrics.avgSatPercent < 10.0) {
-            console.log("[VNBUS] Under-saturated: Gently recovering vibrance");
             satMultiplier = 1.15;
         }
     }
 
     // Rule 3: Highlight Gamut Compression
     if (settings.antiClipping && metrics.maxClipPercent > 4.0) {
-        console.log("[VNBUS] Channel clipping detected (" + metrics.maxClipPercent + "%): Softening highlights");
         satMultiplier *= 0.92;
         rGain = Math.min(rGain, 0.98);
         gGain = Math.min(gGain, 0.98);
@@ -441,7 +522,7 @@ function onProcessPhoto(metrics, settings) {
 
 ---
 
-## 6. Troubleshooting, Debugging & Best Practices
+## 8. Troubleshooting, Debugging & Best Practices
 
 - Always Use Standard ES5/ES6 Syntax
   QuickJS supports modern JavaScript, but avoid browser-specific DOM elements (`window`, `document`) or Node.js APIs (`process`, `require`). Everything must be self-contained in `index.js`.
@@ -461,12 +542,12 @@ function onProcessPhoto(metrics, settings) {
 
 ---
 
-## 7. Publishing, Installing & Updating Plugins
+## 9. Publishing, Installing & Updating Plugins
 
 ### Step 1: Push to Git
 Create a repository on GitHub (or GitLab/Codeberg) containing:
 - `plugin.json`
-- `index.js`
+- `index.js` (if containing capture logic)
 - `README.md`
 Push to your `main` branch. Ensure the repository is Public.
 

@@ -69,6 +69,9 @@ data class PluginManifest(
     val description: String,
     val gitUrl: String = "",
     val overrides: List<String> = emptyList(),
+    val type: String = "EXTENSION",
+    val theme: PluginThemeConfig? = null,
+    val translations: Map<String, String> = emptyMap(),
     val settings: List<PluginSettingItem> = emptyList()
 ) {
     companion object {
@@ -79,12 +82,29 @@ data class PluginManifest(
             val version = obj.optString("version", "1.0.0")
             val author = obj.optString("author", "Community")
             val desc = obj.optString("description", "HoyuShot Git Plugin")
+            val pluginType = obj.optString("type", "EXTENSION").uppercase()
 
             val overridesList = mutableListOf<String>()
             val overridesArr = obj.optJSONArray("overrides")
             if (overridesArr != null) {
                 for (i in 0 until overridesArr.length()) {
                     overridesList.add(overridesArr.getString(i))
+                }
+            }
+
+            // Theme Pack support
+            val themeConfig = if (obj.has("theme")) {
+                PluginThemeConfig.fromJson(obj.optJSONObject("theme"))
+            } else null
+
+            // Language Pack support
+            val transMap = mutableMapOf<String, String>()
+            val transObj = obj.optJSONObject("translations")
+            if (transObj != null) {
+                val it = transObj.keys()
+                while (it.hasNext()) {
+                    val k = it.next()
+                    transMap[k] = transObj.getString(k)
                 }
             }
 
@@ -104,6 +124,9 @@ data class PluginManifest(
                 description = desc,
                 gitUrl = gitUrl,
                 overrides = overridesList,
+                type = pluginType,
+                theme = themeConfig,
+                translations = transMap,
                 settings = settingsList
             )
         }
