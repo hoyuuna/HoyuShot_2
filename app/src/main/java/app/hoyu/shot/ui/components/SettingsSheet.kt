@@ -56,7 +56,6 @@ fun SettingsDialog(
     onTogglePeaking: () -> Unit,
     onToggleZebra: () -> Unit,
     onToggleSunCompass: () -> Unit = {},
-    onToggleAdvFocusBox: () -> Unit = {},
     onToggleHdr: () -> Unit = {},
     pluginManager: app.hoyu.shot.plugin.PluginManager? = null,
     onOpenAdvancedSettings: () -> Unit,
@@ -467,24 +466,13 @@ fun SettingsDialog(
                     )
                 }
 
-                // Sun Compass HUD & Advanced Focus Box Row (Split 50/50)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ConfigToggleItem(
-                        title = "SUN COMPASS",
-                        isActive = uiState.isSunCompassEnabled,
-                        onClick = onToggleSunCompass,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ConfigToggleItem(
-                        title = "ADV F BOX",
-                        isActive = uiState.isAdvFocusBoxEnabled,
-                        onClick = onToggleAdvFocusBox,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                // Sun Compass HUD row
+                ConfigToggleItem(
+                    title = "SUN COMPASS",
+                    isActive = uiState.isSunCompassEnabled,
+                    onClick = onToggleSunCompass,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // 4. Advanced Settings Entry Button
                 Row(

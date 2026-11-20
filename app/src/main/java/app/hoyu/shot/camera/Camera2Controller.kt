@@ -41,8 +41,7 @@ class Camera2Controller(
     private val onHistogramReady: (HistogramData) -> Unit,
     private val onFrameMetadata: (actualIso: Int, actualShutterNanos: Long) -> Unit,
     private val onPhotoSaved: (CapturedPhotoInfo) -> Unit,
-    private val onError: (String) -> Unit,
-    private val onAfStateChanged: ((isFocused: Boolean, isSearching: Boolean) -> Unit)? = null
+    private val onError: (String) -> Unit
 ) {
     private val TAG = "Camera2Controller"
 
@@ -910,14 +909,12 @@ class Camera2Controller(
             lastMeasuredShutter = shutter
             onFrameMetadata(iso, shutter)
 
-            // Dynamic HZM AF State Tracking & Live AF Status
+            // Dynamic HZM AF State Tracking
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
             val isFocusedNow = afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
-                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
-            val isSearchingNow = afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN ||
-                    afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN
-            onAfStateChanged?.invoke(isFocusedNow, isSearchingNow)
-            if (isFocusedNow || isSearchingNow) {
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN
+            if (isFocusedNow) {
                 lastAfFocusAcquiredTimeMs = System.currentTimeMillis()
                 isAfFocusedOrActive = true
             } else if (System.currentTimeMillis() - lastAfFocusAcquiredTimeMs > 1800L) {
