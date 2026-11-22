@@ -106,6 +106,22 @@ class Camera2Controller(
     @Volatile var isBlurBackdropNeeded: Boolean = false
     @Volatile var isHqViewportEnabled: Boolean = true
     @Volatile var isZeroShutterLagEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                val task = Runnable {
+                    if (cameraDevice != null && currentCharacteristics != null) {
+                        createCaptureSession()
+                    }
+                }
+                val handler = backgroundHandler
+                if (handler != null && Looper.myLooper() != handler.looper) {
+                    handler.post(task)
+                } else {
+                    task.run()
+                }
+            }
+        }
     @Volatile var isDynamicZslEnabled: Boolean = true
     @Volatile private var isAfFocusedOrActive: Boolean = false
     @Volatile private var lastAfFocusAcquiredTimeMs: Long = 0L
@@ -815,18 +831,27 @@ class Camera2Controller(
 
         try {
             val includeRawInPrimary = isRawCaptureEnabled && rawImageReader != null
+            val includeZsl = isZeroShutterLagEnabled && zslImageReader != null
+
+            // Stream Concurrency Guard (vital for Google Tensor / Pixel ISP):
+            // Only attach analysis or ZSL surfaces if they are actually active and configured.
             val surfaces = mutableListOf<Surface>().apply {
                 add(pSurface)
                 jpegImageReader?.surface?.let { add(it) }
                 if (includeRawInPrimary) {
                     rawImageReader?.surface?.let { add(it) }
                 }
-                analysisImageReader?.surface?.let { add(it) }
-                zslImageReader?.surface?.let { add(it) }
+                if (includeZsl) {
+                    zslImageReader?.surface?.let { add(it) }
+                }
+                // Analysis stream is attached only when needed, avoiding 4-5 stream exhaustion on Pixel
+                if (needsAnalysisStream() || (!includeRawInPrimary && !includeZsl)) {
+                    analysisImageReader?.surface?.let { add(it) }
+                }
             }
 
-            val attachAnalysis = needsAnalysisStream() && analysisImageReader != null
-            val attachZsl = isZslEligible() && zslImageReader != null
+            val attachAnalysis = needsAnalysisStream() && analysisImageReader != null && surfaces.contains(analysisImageReader?.surface)
+            val attachZsl = isZslEligible() && zslImageReader != null && surfaces.contains(zslImageReader?.surface)
             previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(pSurface)
                 if (attachAnalysis) {
@@ -847,46 +872,26 @@ class Camera2Controller(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.w(TAG, "Capture session configuration failed, attempting fallback without analysis stream")
+                    Log.w(TAG, "Primary capture session configuration failed, falling back to minimal preview+jpeg session")
                     try {
-                        val includeRawInFallback = isRawCaptureEnabled && rawImageReader != null
-                        val fallbackSurfaces = mutableListOf<Surface>().apply {
-                            add(pSurface)
-                            jpegImageReader?.surface?.let { add(it) }
-                            if (includeRawInFallback) {
-                                rawImageReader?.surface?.let { add(it) }
-                            }
-                        }
+                        val fallbackSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
                         previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(pSurface)
                         }
                         isAnalysisTargetAttached = false
+                        isZslTargetAttached = false
                         device.createCaptureSession(fallbackSurfaces, object : CameraCaptureSession.StateCallback() {
                             override fun onConfigured(fbSession: CameraCaptureSession) {
                                 captureSession = fbSession
-                                isRawStreamConfigured = includeRawInFallback
+                                isRawStreamConfigured = false
                                 applyAllSettingsInternal()
                             }
                             override fun onConfigureFailed(s: CameraCaptureSession) {
-                                if (isRawCaptureEnabled) {
-                                    val minimalSurfaces = listOfNotNull(pSurface, jpegImageReader?.surface)
-                                    device.createCaptureSession(minimalSurfaces, object : CameraCaptureSession.StateCallback() {
-                                        override fun onConfigured(minSession: CameraCaptureSession) {
-                                            captureSession = minSession
-                                            isRawStreamConfigured = false
-                                            applyAllSettingsInternal()
-                                        }
-                                        override fun onConfigureFailed(s2: CameraCaptureSession) {
-                                            onError("Failed to configure CameraCaptureSession")
-                                        }
-                                    }, backgroundHandler)
-                                } else {
-                                    onError("Failed to configure CameraCaptureSession")
-                                }
+                                onError("Failed to configure minimal CameraCaptureSession")
                             }
                         }, backgroundHandler)
                     } catch (e: Exception) {
-                        onError("Failed to configure CameraCaptureSession: ${e.message}")
+                        onError("Failed to configure CameraCaptureSession fallback: ${e.message}")
                     }
                 }
             }, backgroundHandler)
